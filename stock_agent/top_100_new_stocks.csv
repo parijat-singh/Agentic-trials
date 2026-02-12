@@ -1,0 +1,101 @@
+symbol,name,market_cap,start_date
+2222.SR,Saudi Aramco,$1.665 T,2019-12-11
+PLTR,Palantir,$323.38 B,2020-09-30
+300750.SZ,CATL,$249.93 B,2018-06-11
+PRX.AS,Prosus,$226.93 B,2019-09-11
+GEV,GE Vernova,$223.47 B,2024-03-27
+ENR.F,Siemens Energy,$165.66 B,2020-09-28
+601138.SS,Foxconn Industrial Internet,$158.66 B,2018-06-13
+APP,AppLovin,$154.51 B,2021-04-15
+PDD,PDD Holdings (Pinduoduo),$148.45 B,2018-07-26
+UBER,Uber,$148.08 B,2019-05-10
+ARM,Arm Holdings,$133.04 B,2023-09-14
+XIACF,Xiaomi,$123.74 B,2021-03-16
+CRWD,CrowdStrike,$104.82 B,2019-06-12
+SPOT,Spotify,$100.30 B,2018-04-03
+CEG,Constellation Energy,$100.30 B,2022-01-19
+BPAC3.SA,BTG Pactual,$95.59 B,2016-07-11
+VRT,Vertiv Holdings,$95.01 B,2018-08-02
+HWM,Howmet Aerospace,$92.91 B,2016-11-01
+601658.SS,Postal Savings Bank of China,$89.27 B,2019-12-10
+SNDK,Sandisk,$88.44 B,2025-02-13
+BAM,Brookfield Asset Management,$84.50 B,2022-12-01
+NU,Nu Holdings,$84.36 B,2021-12-09
+DELL,Dell,$83.21 B,2016-08-17
+CVNA,Carvana,$78.93 B,2017-04-28
+DASH,DoorDash,$75.62 B,2020-12-09
+ABNB,Airbnb,$73.19 B,2020-12-10
+DSV.VI,DSV,$71.64 B,2018-04-05
+HOOD,Robinhood,$70.19 B,2021-07-29
+9633.HK,Nongfu Spring,$69.67 B,2020-09-08
+SE,Sea Limited,$67.79 B,2017-10-20
+688256.SS,Cambricon Technologies,$67.29 B,2020-07-20
+NET,Cloudflare,$66.65 B,2019-09-13
+3690.HK,Meituan,$66.30 B,2018-09-20
+373220.KS,LG Energy Solution,$65.60 B,2022-01-27
+LICI.NS,Life Insurance Corporation of India (LIC),$61.29 B,2022-05-17
+SNOW,Snowflake,$61.19 B,2020-09-16
+UCB.VI,UCB,$59.78 B,2018-02-13
+601319.SS,The People's Insurance Company (PICC),$57.73 B,2018-11-23
+CARR,Carrier Global,$56.06 B,2020-03-19
+207940.KS,Samsung Biologics,$54.96 B,2016-11-11
+VST,Vistra,$54.26 B,2016-10-05
+SHL.DE,Siemens Healthineers,$53.43 B,2018-04-12
+300502.SZ,Eoptolink Technology,$52.46 B,2016-03-03
+RKT,Rocket Companies,$52.34 B,2020-08-06
+ARGX,Argenx,$51.64 B,2017-05-18
+402340.KS,SK Square,$51.58 B,2021-11-29
+CTVA,Corteva,$50.89 B,2019-05-24
+HLN,Haleon,$49.69 B,2022-07-25
+CRWV,CoreWeave,$49.59 B,2025-03-28
+2359.HK,WuXi AppTec,$49.47 B,2018-12-13
+RBLX,Roblox,$48.42 B,2021-03-10
+GALD.SW,Galderma Group,$46.14 B,2024-03-21
+DDOG,Datadog,$44.65 B,2019-09-19
+P911.DE,Porsche,$44.57 B,2022-09-30
+UMG.AS,Universal Music Group,$43.88 B,2021-09-21
+BE,Bloom Energy,$43.63 B,2018-07-25
+ADYEN.AS,Adyen,$43.32 B,2018-06-13
+9992.HK,Pop Mart International Group,$42.85 B,2020-12-11
+DEWA.AE,Dubai Electricity and Water Authority (DEWA),$41.66 B,2022-04-12
+COIN,Coinbase,$41.31 B,2021-04-14
+DTG.F,Daimler Truck,$39.87 B,2021-12-10
+329180.KS,HD Hyundai Heavy Industries,$39.23 B,2021-09-17
+ALC,Alcon,$39.14 B,2019-04-09
+EQT.ST,EQT,$39.01 B,2019-09-24
+1024.HK,Kuaishou Technology,$38.62 B,2021-02-05
+IR,Ingersoll Rand,$38.45 B,2017-05-12
+MDLN,Medline,$37.48 B,2025-12-17
+RKLB,Rocket Lab,$37.19 B,2020-11-24
+2082.SR,ACWA POWER Company,$36.52 B,2021-12-19
+EPI-A.ST,Epiroc,$36.23 B,2018-06-18
+GEHC,GE HealthCare Technologies,$36.09 B,2022-12-15
+SDZ.SW,Sandoz Group,$35.74 B,2023-10-03
+ASTS,AST SpaceMobile,$35.60 B,2019-11-01
+NTR,Nutrien,$35.58 B,2018-01-02
+KVUE,Kenvue,$35.52 B,2023-05-04
+SYM,Symbotic,$35.17 B,2021-03-09
+OTIS,Otis Worldwide,$34.84 B,2020-03-19
+VIK,Viking Holdings,$33.97 B,2024-05-01
+300760.SZ,Mindray,$33.06 B,2018-10-16
+AMMN.JK,PT Amman Mineral Internasional Tbk,$32.85 B,2023-07-07
+CPNG,Coupang,$32.25 B,2021-03-11
+DCII.JK,PT DCI Indonesia Tbk,$32.01 B,2021-01-06
+ORSTED.CO,Ørsted,$31.93 B,2016-06-09
+VICI,VICI Properties,$31.17 B,2018-01-02
+688012.SS,AMEC,$31.07 B,2019-07-22
+HAL.NS,Hindustan Aeronautics,$30.23 B,2018-04-02
+603986.SS,GigaDevice Semiconductor,$29.78 B,2016-08-18
+ETERNAL.NS,Eternal (Zomato),$29.70 B,2021-07-23
+MDB,MongoDB,$29.66 B,2017-10-19
+NZYM.VI,Novonesis,$28.78 B,2018-04-05
+003816.SZ,China General Nuclear Power Group (CGN),$28.53 B,2019-08-26
+TME,Tencent Music Entertainment,$28.53 B,2018-12-12
+DMART.NS,DMart,$28.47 B,2017-03-21
+3692.HK,Hansoh Pharma,$28.19 B,2019-06-14
+EXO.AS,Exor,$28.03 B,2022-08-12
+600919.SS,Bank of Jiangsu,$27.81 B,2016-08-02
+ZM,Zoom,$27.57 B,2019-04-18
+601127.SS,Seres Group,$27.56 B,2016-06-17
+GULF.BK,Gulf Development Public Company,$27.47 B,2025-04-03
+BNTX,BioNTech,$27.44 B,2019-10-10

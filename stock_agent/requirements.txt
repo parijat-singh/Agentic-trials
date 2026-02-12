@@ -1,0 +1,7 @@
+pandas
+requests
+lxml
+html5lib
+tqdm
+pandas_datareader
+beautifulsoup4
