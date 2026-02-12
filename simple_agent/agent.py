@@ -4,6 +4,8 @@ from tools import TOOL_DEFINITIONS, TOOL_REGISTRY
 
 # System Prompt defining the ReAct behavior
 SYSTEM_PROMPT = f"""You are a smart AI assistant.
+You do NOT know the current date or time. You MUST use the 'get_time' tool to find out.
+
 You have access to the following tools:
 
 {TOOL_DEFINITIONS}
@@ -25,6 +27,7 @@ class Agent:
     def __init__(self):
         self.llm = LLMClient()
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        #print("dubegged code")
 
     def run(self, user_input, max_turns=5):
         """
@@ -38,7 +41,8 @@ class Agent:
             print(f"--- Turn {turn_count + 1} ---")
             
             # 1. Get LLM Response
-            response_text = self.llm.get_completion(self.messages)
+            # added stop sequence to prevent hallucinating the observation
+            response_text = self.llm.get_completion(self.messages, stop=["Observation:"])
             print(f"LLM Response:\n{response_text}\n")
             
             # Append LLM's thought/action to history so it knows what it did
@@ -62,13 +66,19 @@ class Agent:
                     print(f"-> Executing Tool: {tool_name} with input: {tool_input}")
                     try:
                         tool_func = TOOL_REGISTRY[tool_name]
-                        # Some tools might not take arguments, strictly speaking, 
-                        # but our prompt implies 'Action Input'.
-                        # For 'get_time', we ignore input. For 'calculate', we use it.
-                        if tool_name == "get_time":
-                            result = tool_func()
-                        else:
+                        # Clean up input (remove quotes if LLM added them)
+                        if (tool_input.startswith('"') and tool_input.endswith('"')) or \
+                           (tool_input.startswith("'") and tool_input.endswith("'")):
+                            tool_input = tool_input[1:-1]
+
+                        # Special handling if the tool takes no args (optional but good for robustness if we had such tools)
+                        # But here, both tools CAN take a string argument (get_time takes optional timezone).
+                        # We pass the input if it's not empty.
+                        if tool_input:
                             result = tool_func(tool_input)
+                        else:
+                            result = tool_func()
+                            
                     except Exception as e:
                         result = f"Error executing tool: {e}"
                     

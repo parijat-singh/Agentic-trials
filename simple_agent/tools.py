@@ -12,23 +12,30 @@ def calculate(expression):
     except Exception as e:
         return f"Error: {str(e)}"
 
-def get_time():
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo # For older python versions if needed
+
+def get_time(timezone="America/Los_Angeles"):
     """
-    Returns the current date and time.
+    Returns the current date and time in the specified timezone.
+    Default is America/Los_Angeles (PST/PDT).
     """
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        now = datetime.datetime.now(ZoneInfo(timezone))
+        return now.strftime("%Y-%m-%d %H:%M:%S %Z")
+    except Exception as e:
+        return f"Error: {str(e)}. Please use a valid IANA timezone (e.g., 'America/New_York', 'UTC', 'Europe/London')."
 
 # Tool Registry
-# This dictionary maps tool names to the actual function objects.
-# The agent will use this to execute the requested tool.
 TOOL_REGISTRY = {
     "calculate": calculate,
     "get_time": get_time
 }
 
 # Tool Definitions for the LLM System Prompt
-# This tells the LLM what tools are available and how to use them.
 TOOL_DEFINITIONS = """
 1. calculate(expression): A calculator. Use this for math questions. Argument 'expression' is a string like "2 + 2".
-2. get_time(): Returns the current date and time. No arguments needed.
+2. get_time(timezone): Returns the current date and time. Argument 'timezone' is optional (default 'America/Los_Angeles'). Use IANA format like 'America/New_York'.
 """
