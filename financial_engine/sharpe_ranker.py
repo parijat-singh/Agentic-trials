@@ -42,11 +42,26 @@ def rank_stocks(data_dir, risk_free_rate):
     """
     results = []
     
-    # Find all CSVs
-    csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
-    print(f"Found {len(csv_files)} stock files in {data_dir}...")
+    # Load symbols from metadata file (US Filter source of truth)
+    meta_file = os.path.join(data_dir, "..", "top_100_new_stocks.csv")
+    if os.path.exists(meta_file):
+        meta_df = pd.read_csv(meta_file)
+        # Assuming column is 'symbol' or 'Symbol' (check case)
+        # market_cap_scraper uses lowercase 'symbol'
+        if 'symbol' in meta_df.columns:
+            files_to_process = [os.path.join(data_dir, f"{s}.csv") for s in meta_df['symbol']]
+        else:
+             print("Warning: 'symbol' column not found in metadata. Using glob.")
+             files_to_process = glob.glob(os.path.join(data_dir, "*.csv"))
+    else:
+        print("Warning: Metadata file not found. Using glob.")
+        files_to_process = glob.glob(os.path.join(data_dir, "*.csv"))
+
+    print(f"Processing {len(files_to_process)} stocks from metadata...")
     
-    for file_path in csv_files:
+    for file_path in files_to_process:
+        if not os.path.exists(file_path):
+            continue
         try:
             # Load Data
             df = pd.read_csv(file_path, parse_dates=['Date'], index_col='Date')

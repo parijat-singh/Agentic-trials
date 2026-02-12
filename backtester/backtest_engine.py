@@ -10,8 +10,19 @@ def load_3y_data(data_dir):
     Filters for stocks with at least 3 years of data.
     Returns: DataFrame of prices (Forward Filled).
     """
-    csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
-    print(f"Scanning {len(csv_files)} files in {data_dir}...")
+    # Use metadata file source of truth
+    meta_file = os.path.join(data_dir, "..", "top_100_new_stocks.csv")
+    if os.path.exists(meta_file):
+        meta_df = pd.read_csv(meta_file)
+        if 'symbol' in meta_df.columns:
+            csv_files = [os.path.join(data_dir, f"{s}.csv") for s in meta_df['symbol']]
+            csv_files = [f for f in csv_files if os.path.exists(f)]
+        else:
+            csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+    else:
+        csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+
+    print(f"Scanning {len(csv_files)} files (from metadata) in {data_dir}...")
     
     price_data = {}
     
@@ -24,6 +35,9 @@ def load_3y_data(data_dir):
             symbol = os.path.basename(file_path).replace(".csv", "")
             df = pd.read_csv(file_path, parse_dates=['Date'], index_col='Date')
             
+            # Force index to datetime
+            df.index = pd.to_datetime(df.index, utc=True)
+            
             # Ensure index is tz-naive
             if df.index.tz is not None:
                 df.index = df.index.tz_localize(None)
@@ -34,30 +48,44 @@ def load_3y_data(data_dir):
                 
             price_data[symbol] = df['Close']
             
-        except Exception as e:
+        except Exception:
             continue
             
     # Combine
     prices_df = pd.DataFrame(price_data)
     
+    if prices_df.empty:
+        print("Error: No stocks passed the initial length filter.")
+        return pd.DataFrame()
+
     # Forward fill
     prices_df = prices_df.ffill()
     
-    # Filter to last 3 years (if available)
+    # Filter to last 3 years (OR max available if less)
     # Find the index that is closest to 3 years ago
-    start_date = prices_df.index[-1] - pd.DateOffset(years=3)
+    last_date = prices_df.index[-1]
+    start_date = last_date - pd.DateOffset(years=3)
+    
+    # If data doesn't go back 3 years, use what we have
+    if start_date < prices_df.index[0]:
+        print(f"Warning: Full 3 years not available. Using data since {prices_df.index[0].date()}")
+        start_date = prices_df.index[0]
     
     # Slice from start_date
     prices_df = prices_df[prices_df.index >= start_date]
     
     # Drop columns that have too many NaNs in this window (e.g. IPOd recently)
-    # We require at least 90% valid data in the 3 year window
-    threshold = int(len(prices_df) * 0.9)
+    # We require at least 50% valid data in the window (relaxed from 90%)
+    threshold = int(len(prices_df) * 0.5)
     prices_df = prices_df.dropna(axis=1, thresh=threshold)
     
     # Drop remaining rows with NaNs (e.g. holidays)
     prices_df = prices_df.dropna()
     
+    if prices_df.empty:
+         print("Error: DataFrame empty after filtering NaNs.")
+         return pd.DataFrame()
+
     print(f"Loaded {prices_df.shape[1]} stocks with data since {prices_df.index[0].date()}.")
     return prices_df
 
@@ -65,30 +93,42 @@ def filter_consecutive_growth(prices_df):
     """
     Filters for stocks that had positive returns in Year 1, Year 2, and Year 3 individually.
     """
-    # Resample to Yearly ('YE' or 'Y' depending on pandas version, using 'YE' for future proofing or 'Y')
-    # We will just split into 3 chunks to be safe and rigorous about "last 3 years"
-    
-    # Calculate yearly returns
-    yearly_prices = prices_df.resample('YE').last()
-    
-    # Add the starting price (first row of prices_df) as the base for the first year
-    # Actually, simpler: Calculate annual pct_change on yearly_prices
-    yearly_returns = yearly_prices.pct_change()
-    
-    # We need to ensure we look at the last 3 complete periods or just check if all are positive
-    # Filter columns where ALL yearly returns > 0 (ignoring the first NaN)
-    
+    if prices_df.empty:
+        print("Error: No stocks with sufficient 3-year history found.")
+        return [], None
+
+    # 2. Filter for Consistency (Consecutive Annual Growth)
+    print("\n--- Step 2: Filtering for Consecutive Growth ---")
     consistent_stocks = []
     
-    for symbol in yearly_returns.columns:
-        # Get returns, drop NaN
-        rets = yearly_returns[symbol].dropna()
+    # Resample to yearly
+    yearly_returns = prices_df.resample('YE').last().pct_change().dropna()
+    
+    # We need at least 3 years of returns to check consistency
+    if len(yearly_returns) < 3:
+         print(f"Warning: Only {len(yearly_returns)} years of data available. Cannot check 3-year consistency strictness. Skipping filter.")
+         consistent_stocks = prices_df.columns.tolist() # Fallback
+    else:
+        # Check last 3 periods
+        last_3_years = yearly_returns.iloc[-3:]
+        print(f"Checking consistency for years: {last_3_years.index.strftime('%Y').tolist()}")
         
-        # Check if all > 0
-        if len(rets) >= 2 and (rets > 0).all(): # At least 2-3 years, all positive
-             consistent_stocks.append(symbol)
-             
+        for stock in prices_df.columns:
+            years_positive = (last_3_years[stock] > 0).all()
+            if years_positive:
+                consistent_stocks.append(stock)
+
     print(f"Found {len(consistent_stocks)} stocks with consecutive annual growth.")
+    
+    if not consistent_stocks:
+        print("No stocks met the consecutive growth criteria. Relaxing filter to 'Positive Cumulative Return'...")
+        total_ret = (prices_df.iloc[-1] / prices_df.iloc[0]) - 1
+        consistent_stocks = total_ret[total_ret > 0].index.tolist()
+        print(f"Found {len(consistent_stocks)} stocks with positive 3-year cumulative return.")
+
+    if not consistent_stocks:
+        print("Error: No stocks found even after relaxing criteria.")
+        return [], None
     return prices_df[consistent_stocks]
 
 def optimize_total_return(prices_df):

@@ -82,9 +82,12 @@ def get_companies_from_page(page_num):
 
 import yfinance as yf
 
+# Modified Goal: Filter for stocks with at least 5 years of history
+FIVE_YEARS_AGO = datetime.now() - timedelta(days=5*365)
+
 def check_history_and_download(symbol):
     """
-    Checks if stock started trading < 10 years ago using yfinance.
+    Checks if stock started trading > 5 years ago using yfinance.
     If yes, saves to CSV and returns (True, StartDate).
     If no or error, returns (False, None).
     """
@@ -93,6 +96,15 @@ def check_history_and_download(symbol):
         try:
             # Use yfinance Ticker
             ticker = yf.Ticker(symbol)
+            
+            # US Filter: Check currency
+            try:
+                currency = ticker.fast_info.get('currency', 'Unknown')
+                if currency != 'USD':
+                    return False, None
+            except:
+                pass
+
             # Fetch history metadata or full history (period="max")
             # "max" ensures we find the true start date
             hist = ticker.history(period="max", auto_adjust=True)
@@ -105,14 +117,14 @@ def check_history_and_download(symbol):
             hist = hist.sort_index()
             first_trade = hist.index[0]
             
-            # Check if first trade is recent enough (>= 10 years ago)
-            # Meaning: It started trading AFTER the cutoff.
+            # Check if first trade is OLD enough (<= 5 years ago)
+            # Meaning: It started trading BEFORE the cutoff.
             # Convert to tz-naive if needed for comparison, or ensure consistent timezone
-            # TEN_YEARS_AGO is naive (local time). hist.index is usually timezone-aware.
+            # FIVE_YEARS_AGO is naive (local time). hist.index is usually timezone-aware.
             if first_trade.tzinfo:
                 first_trade = first_trade.tz_localize(None)
                 
-            if first_trade >= TEN_YEARS_AGO:
+            if first_trade <= FIVE_YEARS_AGO:
                 # It's a match!
                 if not os.path.exists(DATA_DIR):
                     os.makedirs(DATA_DIR)
