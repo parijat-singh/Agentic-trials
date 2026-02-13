@@ -87,6 +87,13 @@ def main():
     
     # Scripts to run
     
+    import time
+    import json
+    
+    start_time = time.time()
+    
+    # ... (Rest of script execution) ...
+    
     # 1. Scraper (Optional skip)
     if not args.skip_scraper:
         scraper_script = os.path.join(root_dir, "stock_agent", "market_cap_scraper.py")
@@ -112,9 +119,27 @@ def main():
     ]
     
     for script_path, desc in scripts:
+        # Before running report, save the elapsed time to stats so report can pick it up
         if "create_report.py" in script_path:
-             # Pass the run description to the report generator logic if needed
-             # Currently create_report checks sys.argv[1] for criteria description
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            hours, rem = divmod(elapsed_time, 3600)
+            minutes, seconds = divmod(rem, 60)
+            time_str = "{:0>2}:{:0>2}:{:05.2f}".format(int(hours), int(minutes), seconds)
+            
+            # Save to stats
+            stats_path = os.path.join(root_dir, "stock_agent", "scraping_stats.json")
+            if os.path.exists(stats_path):
+                try:
+                    with open(stats_path, 'r') as f:
+                         stats = json.load(f)
+                    stats["Total_Time"] = time_str
+                    with open(stats_path, 'w') as f:
+                        json.dump(stats, f, indent=2)
+                except Exception as e:
+                    print(f"Error saving time stats: {e}")
+        
+        if "create_report.py" in script_path:
              if not run_script(script_path, desc, args=[run_description]):
                 print("Pipeline interrupted.")
                 sys.exit(1)

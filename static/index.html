@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -82,7 +83,8 @@
             font-weight: 500;
         }
 
-        input[type="number"], input[type="text"] {
+        input[type="number"],
+        input[type="text"] {
             width: 100%;
             padding: 0.75rem;
             background-color: var(--bg-color);
@@ -93,7 +95,8 @@
             transition: border-color 0.2s;
         }
 
-        input[type="number"]:focus, input[type="text"]:focus {
+        input[type="number"]:focus,
+        input[type="text"]:focus {
             outline: none;
             border-color: var(--accent-color);
             ring: 2px solid rgba(59, 130, 246, 0.5);
@@ -139,7 +142,8 @@
         }
 
         #results-area {
-            background-color: #0f172a; /* Slightly darker for code */
+            background-color: #0f172a;
+            /* Slightly darker for code */
             font-family: 'Fira Code', 'Consolas', monospace;
             white-space: pre-wrap;
             overflow-x: auto;
@@ -160,24 +164,71 @@
             margin-bottom: 1rem;
         }
 
-        .status-idle { background-color: var(--border-color); color: var(--text-secondary); }
-        .status-running { background-color: var(--accent-color); color: white; animation: pulse 2s infinite; }
-        .status-success { background-color: var(--success-color); color: #022c22; }
-        .status-error { background-color: var(--error-color); color: white; }
+        .status-idle {
+            background-color: var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .status-running {
+            background-color: var(--accent-color);
+            color: white;
+            animation: pulse 2s infinite;
+        }
+
+        .status-success {
+            background-color: var(--success-color);
+            color: #022c22;
+        }
+
+        .status-error {
+            background-color: var(--error-color);
+            color: white;
+        }
 
         @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.7; }
-            100% { opacity: 1; }
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
+
+            100% {
+                opacity: 1;
+            }
         }
 
         /* Markdown Styling Sim */
-        h2 { border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; margin-top: 1.5rem; color: var(--text-primary); }
-        h3 { margin-top: 1.25rem; color: #e2e8f0; }
-        table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-        th, td { border: 1px solid var(--border-color); padding: 0.5rem; text-align: left; }
-        th { background-color: var(--bg-color); }
-        
+        h2 {
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+            margin-top: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        h3 {
+            margin-top: 1.25rem;
+            color: #e2e8f0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        th,
+        td {
+            border: 1px solid var(--border-color);
+            padding: 0.5rem;
+            text-align: left;
+        }
+
+        th {
+            background-color: var(--bg-color);
+        }
+
         .loading-overlay {
             display: none;
             justify-content: center;
@@ -185,141 +236,204 @@
             margin-top: 1rem;
             color: var(--text-secondary);
         }
-        
     </style>
 </head>
+
 <body>
 
-<div class="container">
-    <header>
-        <h1>Agentic Analysis Pipeline</h1>
-        <p class="subtitle">Configure and run the full stock analysis engine.</p>
-    </header>
+    <div class="container">
+        <header>
+            <h1>Agentic Analysis Pipeline</h1>
+            <p class="subtitle">Configure and run the full stock analysis engine.</p>
+        </header>
 
-    <div class="grid">
-        <!-- Configuration Panel -->
-        <div class="card">
-            <h2 style="margin-top:0">Parameters</h2>
-            <form id="analysis-form">
-                
-                <div class="form-group">
-                    <label for="min_history">Min History (Years)</label>
-                    <input type="number" id="min_history" value="5.0" step="0.5" min="1">
-                </div>
+        <div class="grid">
+            <!-- Configuration Panel -->
+            <div class="card">
+                <h2 style="margin-top:0">Parameters</h2>
+                <form id="analysis-form">
 
-                <div class="form-group">
-                    <label for="min_ipo">Min IPO Age (Years)</label>
-                    <input type="number" id="min_ipo" value="5.0" step="0.5" min="0">
-                </div>
+                    <div class="form-group">
+                        <label for="min_history">Min History (Years)</label>
+                        <input type="number" id="min_history" value="5.0" step="0.5" min="1">
+                    </div>
 
-                <div class="form-group">
-                    <label for="max_ipo">Max IPO Age (Years)</label>
-                    <input type="number" id="max_ipo" value="10.0" step="0.5" min="0">
-                </div>
+                    <div class="form-group">
+                        <label for="min_ipo">Min IPO Age (Years)</label>
+                        <input type="number" id="min_ipo" value="5.0" step="0.5" min="0">
+                    </div>
 
-                <div class="form-group">
-                    <label for="max_pe">Max P/E Ratio (Optional)</label>
-                    <input type="number" id="max_pe" placeholder="e.g. 25.0" step="0.5" min="0">
-                </div>
+                    <div class="form-group">
+                        <label for="max_ipo">Max IPO Age (Years)</label>
+                        <input type="number" id="max_ipo" value="10.0" step="0.5" min="0">
+                    </div>
 
-                <div class="form-group">
-                    <label for="max_pages">Max Search Pages</label>
-                    <input type="number" id="max_pages" value="200" step="1" min="1">
-                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">200 pages ≈ 20,000 stocks</div>
-                </div>
+                    <div class="form-group">
+                        <label for="max_pe">Max P/E Ratio (Optional)</label>
+                        <input type="number" id="max_pe" placeholder="e.g. 25.0" step="0.5" min="0">
+                    </div>
 
-                <div class="form-group checkbox-group">
-                    <input type="checkbox" id="skip_scraper">
-                    <label for="skip_scraper" style="margin-bottom: 0; cursor: pointer;">Skip Scraper (Use Cached Data)</label>
-                </div>
+                    <div class="form-group">
+                        <label for="max_pages">Max Search Pages</label>
+                        <input type="number" id="max_pages" value="200" step="1" min="1">
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">200 pages ≈
+                            20,000 stocks</div>
+                    </div>
 
-                <button type="submit" id="run-btn">Run Analysis</button>
-                <div id="loading" class="loading-overlay">
-                    <span>Running Pipeline... (This may take a while)</span>
-                </div>
-            </form>
-        </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="skip_scraper">
+                        <label for="skip_scraper" style="margin-bottom: 0; cursor: pointer;">Skip Scraper (Use Cached
+                            Data)</label>
+                    </div>
 
-        <!-- Results Panel -->
-        <div class="card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h2 style="margin:0">Output Report</h2>
-                <span id="status-badge" class="status-badge status-idle">Idle</span>
+                    <button type="submit" id="run-btn">Run Analysis</button>
+                    <div id="loading" class="loading-overlay">
+                        <span>Running Pipeline... (This may take a while)</span>
+                    </div>
+                </form>
             </div>
-            
-            <div id="results-area">
-                Results will appear here...
+
+            <!-- Results Panel -->
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2 style="margin:0">Output Report</h2>
+                    <span id="status-badge" class="status-badge status-idle">Idle</span>
+                </div>
+
+                <div id="results-area">
+                    Results will appear here...
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<script>
-    const form = document.getElementById('analysis-form');
-    const runBtn = document.getElementById('run-btn');
-    const loadingDiv = document.getElementById('loading');
-    const resultsArea = document.getElementById('results-area');
-    const statusBadge = document.getElementById('status-badge');
+    <script>
+        const form = document.getElementById('analysis-form');
+        const runBtn = document.getElementById('run-btn');
+        const loadingDiv = document.getElementById('loading');
+        const resultsArea = document.getElementById('results-area');
+        const statusBadge = document.getElementById('status-badge');
 
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
+        let pollInterval = null;
+        let isStopping = false;
 
-        // UI State
-        runBtn.disabled = true;
-        runBtn.innerText = "Processing...";
-        loadingDiv.style.display = 'flex';
-        statusBadge.className = 'status-badge status-running';
-        statusBadge.innerText = 'Running';
-        resultsArea.innerText = "Initializing pipeline...\nWaiting for server response...";
+        // Create Stop Button dynamically or toggle Run button?
+        // Let's toggle Run button to Stop button when running
 
-        // Collect Params
-        const maxPeVal = document.getElementById('max_pe').value;
-        const payload = {
-            min_history: parseFloat(document.getElementById('min_history').value),
-            min_ipo: parseFloat(document.getElementById('min_ipo').value),
-            max_ipo: parseFloat(document.getElementById('max_ipo').value),
-            max_pe: maxPeVal ? parseFloat(maxPeVal) : null,
-            max_pages: parseInt(document.getElementById('max_pages').value),
-            skip_scraper: document.getElementById('skip_scraper').checked
-        };
-
-        try {
-            const response = await fetch('/analyze', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'API request failed');
-            }
-
-            const data = await response.json();
-
-            if (data.status === 'success') {
-                statusBadge.className = 'status-badge status-success';
-                statusBadge.innerText = 'Complete';
-                resultsArea.innerText = data.report || "No report content found.";
+        function setRunningState(running) {
+            if (running) {
+                runBtn.innerText = "Stop Analysis";
+                runBtn.style.backgroundColor = "var(--error-color)";
+                runBtn.onclick = stopAnalysis; // Override submit
+                loadingDiv.style.display = 'flex';
+                statusBadge.className = 'status-badge status-running';
+                statusBadge.innerText = 'Running';
             } else {
-                statusBadge.className = 'status-badge status-error';
-                statusBadge.innerText = 'Warning';
-                resultsArea.innerText = data.message + "\n\nLogs:\n" + data.stdout;
+                runBtn.innerText = "Run Analysis";
+                runBtn.style.backgroundColor = "var(--accent-color)";
+                runBtn.onclick = null; // Revert to submit
+                runBtn.disabled = false;
+                loadingDiv.style.display = 'none';
+            }
+        }
+
+        async function stopAnalysis(e) {
+            if (e) e.preventDefault();
+            if (isStopping) return;
+            isStopping = true;
+            runBtn.innerText = "Stopping...";
+            runBtn.disabled = true;
+
+            try {
+                await fetch('/stop', { method: 'POST' });
+            } catch (err) {
+                console.error("Failed to stop:", err);
+            }
+        }
+
+        // Handle Run
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (runBtn.innerText.includes("Stop")) {
+                stopAnalysis(e);
+                return;
             }
 
-        } catch (error) {
-            statusBadge.className = 'status-badge status-error';
-            statusBadge.innerText = 'Error';
-            resultsArea.innerText = `Error: ${error.message}`;
-        } finally {
-            runBtn.disabled = false;
-            runBtn.innerText = "Run Analysis";
-            loadingDiv.style.display = 'none';
+            // Clear previous
+            resultsArea.innerText = "Initializing pipeline...\n";
+            isStopping = false;
+
+            // Collect Params
+            const maxPeVal = document.getElementById('max_pe').value;
+            const payload = {
+                min_history: parseFloat(document.getElementById('min_history').value),
+                min_ipo: parseFloat(document.getElementById('min_ipo').value),
+                max_ipo: parseFloat(document.getElementById('max_ipo').value),
+                max_pe: maxPeVal ? parseFloat(maxPeVal) : null,
+                max_pages: parseInt(document.getElementById('max_pages').value),
+                skip_scraper: document.getElementById('skip_scraper').checked
+            };
+
+            try {
+                // 1. Start Analysis
+                const startResp = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!startResp.ok) {
+                    const err = await startResp.json();
+                    throw new Error(err.detail || "Failed to start");
+                }
+
+                // 2. Enter Running State
+                setRunningState(true);
+
+                // 3. Start Polling
+                pollInterval = setInterval(pollStatus, 1000);
+
+            } catch (error) {
+                statusBadge.className = 'status-badge status-error';
+                statusBadge.innerText = 'Error';
+                resultsArea.innerText += `\nError starting: ${error.message}`;
+            }
+        });
+
+        async function pollStatus() {
+            try {
+                const resp = await fetch('/status');
+                const data = await resp.json();
+
+                // Update Logs
+                // Simple scroll to bottom if at bottom?
+                const atBottom = resultsArea.scrollTop + resultsArea.clientHeight >= resultsArea.scrollHeight - 50;
+                resultsArea.innerText = data.logs || "Waiting for logs...";
+                if (atBottom) resultsArea.scrollTop = resultsArea.scrollHeight;
+
+                // Check Status
+                if (data.status === 'completed') {
+                    clearInterval(pollInterval);
+                    setRunningState(false);
+                    statusBadge.className = 'status-badge status-success';
+                    statusBadge.innerText = 'Complete';
+                    if (data.report) resultsArea.innerText = data.report; // Show report on top? Or just logs? 
+                    // Let's show report if available, else logs
+                    if (data.report) resultsArea.innerText = data.report;
+                } else if (data.status === 'error' || data.status === 'stopped') {
+                    clearInterval(pollInterval);
+                    setRunningState(false);
+                    statusBadge.className = 'status-badge status-error';
+                    statusBadge.innerText = data.status === 'stopped' ? 'Stopped' : 'Error';
+                }
+
+            } catch (e) {
+                console.error("Poll error:", e);
+            }
         }
-    });
-</script>
+    </script>
 
 </body>
+
 </html>

@@ -96,25 +96,67 @@ def load_portfolio(file_path):
         pass
     return df.set_index('Symbol')['Weight'].to_dict()
 
+# ... (Imports remain same) ...
+
+# ... (Helper Functions) ...
+
 def get_price_data(symbols, valid_start_date="2023-01-01"):
     data = {}
-    for symbol in symbols:
+    
+    # Ensure SPY is in the list for benchmark
+    search_symbols = list(set(symbols + ['SPY']))
+    
+    for symbol in search_symbols:
         try:
+            # Check local first
             path = os.path.join(DATA_DIR, f"{symbol}.csv")
-            if not os.path.exists(path): continue
-            df = pd.read_csv(path, parse_dates=['Date'], index_col='Date')
-            df.index = pd.to_datetime(df.index, utc=True).tz_localize(None)
-            data[symbol] = df['Close']
+            if os.path.exists(path):
+                df = pd.read_csv(path, parse_dates=['Date'], index_col='Date')
+                df.index = pd.to_datetime(df.index, utc=True).tz_localize(None)
+                data[symbol] = df['Close']
+            else:
+                # If SPY not found locally, try fetch (it might not be in scanned list)
+                if symbol == 'SPY':
+                    print(f"Fetching SPY data for benchmark...", flush=True)
+                    try:
+                        ticker = yf.Ticker("SPY")
+                        hist = ticker.history(period="10y")
+                        # Normalize to date only to align with other stocks
+                        hist.index = pd.to_datetime(hist.index, utc=True).tz_convert('US/Eastern').tz_localize(None).normalize()
+                        data[symbol] = hist['Close']
+                    except Exception as e:
+                        print(f"Error fetching SPY data: {e}", flush=True)
         except Exception:
             continue
     
     if not data: return pd.DataFrame()
-    df_prices = pd.DataFrame(data)
-    df_prices.sort_index(inplace=True)
-    return df_prices[df_prices.index >= valid_start_date]
 
-def calculate_metrics(portfolio_weights, price_data):
-    relevant_prices = price_data[list(portfolio_weights.keys())].dropna()
+    df_prices = pd.DataFrame(data)
+    
+    # Ensure all indices are normalized just in case
+    df_prices.index = pd.to_datetime(df_prices.index).normalize()
+    
+    # Filter by start date
+    return df_prices[df_prices.index >= pd.Timestamp(valid_start_date)]
+
+def calculate_metrics(portfolio_weights, price_data, benchmark_symbol='SPY'):
+    """
+    Calculate portfolio metrics including Alpha and Beta against a benchmark.
+    Returns: Dict keyed by year.
+    """
+    metrics = {}
+    
+    if not portfolio_weights or price_data.empty: return {}
+
+    symbols = list(portfolio_weights.keys())
+    # Ensure benchmark is in price_data
+    if benchmark_symbol not in price_data.columns:
+        # If no benchmark, can't calc alpha/beta
+        benchmark_series = None
+    else:
+        benchmark_series = price_data[benchmark_symbol]
+        
+    relevant_prices = price_data[symbols].dropna()
     if relevant_prices.empty: return {}
 
     total_weight = sum(portfolio_weights.values())
@@ -122,10 +164,24 @@ def calculate_metrics(portfolio_weights, price_data):
     
     daily_returns = relevant_prices.pct_change().dropna()
     if daily_returns.empty: return {}
-        
+    
+    # Align benchmark
+    if benchmark_series is not None:
+        bench_ret = benchmark_series.pct_change().dropna()
+        # Align dates
+        common_idx = daily_returns.index.intersection(bench_ret.index)
+        daily_returns = daily_returns.loc[common_idx]
+        bench_ret = bench_ret.loc[common_idx]
+    
+    if daily_returns.empty: return {}
+
     portfolio_daily_ret = daily_returns.dot(pd.Series(clean_weights))
     years = portfolio_daily_ret.index.year.unique()
     results = {}
+    
+    # Risk Free Rate assumption (annualized)
+    rf_rate = 0.04
+    daily_rf = (1 + rf_rate)**(1/252) - 1
     
     for year in years:
         idx = portfolio_daily_ret.index.year == year
@@ -134,12 +190,36 @@ def calculate_metrics(portfolio_weights, price_data):
             
         total_ret = (1 + year_returns).prod() - 1
         vol = year_returns.std() * np.sqrt(252)
-        sharpe = (year_returns.mean() * 252) / vol if vol != 0 else 0
+        sharpe = ((year_returns.mean() - daily_rf) * 252) / vol if vol != 0 else 0
+        
+        # Alpha / Beta
+        alpha = np.nan
+        beta = np.nan
+        
+        if benchmark_series is not None:
+            year_bench = bench_ret.loc[idx]
+            print(f"DEBUG Year {year}: Returns {len(year_returns)}, Bench {len(year_bench)}", flush=True)
+            if not year_bench.empty and len(year_bench) == len(year_returns):
+                # Covariance
+                cov_matrix = np.cov(year_returns, year_bench)
+                cov = cov_matrix[0, 1]
+                var_bench = np.var(year_bench, ddof=1)
+                
+                if var_bench > 0:
+                    beta = cov / var_bench
+                    # Alpha = Rp - (Rf + Beta * (Rm - Rf)) -> Daily then annualize? or just Annual inputs?
+                    # Using Annualized Return for Alpha approximation
+                    bench_total_ret = (1 + year_bench).prod() - 1
+                    alpha = total_ret - (rf_rate + beta * (bench_total_ret - rf_rate))
+                else:
+                    print(f"DEBUG: var_bench <= 0: {var_bench}", flush=True)
         
         results[year] = {
             "Return": total_ret,
             "Volatility": vol,
-            "Sharpe": sharpe
+            "Sharpe": sharpe,
+            "Alpha": alpha,
+            "Beta": beta
         }
     return results
 
@@ -147,11 +227,45 @@ def format_metrics_table(metrics):
     if not metrics:
         return "Insufficient data for yearly analysis.\n"
     
-    table = "| Year | Return | Volatility | Sharpe Ratio |\n|:---|---:|---:|---:|\n"
+    table = "| Year | Return | Volatility | Sharpe Ratio | Alpha | Beta |\n"
+    table += "|:---|---:|---:|---:|---:|---:|\n"
     for year in sorted(metrics.keys(), reverse=True):
         m = metrics[year]
-        table += f"| **{year}** | {m['Return']:.2%} | {m['Volatility']:.2%} | {m['Sharpe']:.2f} |\n"
+        alpha_str = f"{m['Alpha']:.2%}" if not np.isnan(m['Alpha']) else "N/A"
+        beta_str = f"{m['Beta']:.2f}" if not np.isnan(m['Beta']) else "N/A"
+        
+        table += f"| **{year}** | {m['Return']:.2%} | {m['Volatility']:.2%} | {m['Sharpe']:.2f} | {alpha_str} | {beta_str} |\n"
     return table + "\n"
+
+# ... (Rest of format functions) ...
+
+# --- Main Report Generation ---
+def generate_markdown(criteria_description="Default Run"):
+    # ... (Loading Stats) ...
+    # Read Parameters from Stats
+    stats = {}
+    if os.path.exists(FILE_STATS):
+        try:
+            with open(FILE_STATS, 'r') as f:
+                stats = json.load(f)
+        except Exception as e:
+            print(f"DEBUG: Error loading stats json: {e}")
+            
+    total_time = stats.get("Total_Time", "N/A")
+    
+    # ... (Rest of Header/Waterfall) ...
+    
+    # ... (Section 4 and Final Writing) ...
+    
+    # ... (Inside generate_markdown, at the end of report content) ...
+    if total_time != "N/A":
+        report_content += f"\n**Total Analysis Time:** {total_time}\n"
+    
+    # Write Report
+    with open(OUTPUT_FILE, "w", encoding='utf-8') as f:
+        f.write(report_content)
+    # ... (Rest of Function) ...
+
 
 import yfinance as yf
 
