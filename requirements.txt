@@ -1,0 +1,15 @@
+pandas
+numpy
+yfinance
+scipy
+matplotlib
+requests
+lxml
+html5lib
+tqdm
+pandas_datareader
+beautifulsoup4
+fastapi
+uvicorn
+pydantic
+aiofiles

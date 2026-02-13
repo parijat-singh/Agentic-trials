@@ -3,3 +3,14 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# Data and Artifacts
+stock_agent/data/
+stock_agent/scraping_stats.json
+top_100_new_stocks.csv
+financial_engine/top_50_stocks.csv
+portfolio_optimizer/optimal_portfolio.csv
+backtester/best_3y_combination.csv
+reports_archive/
+REPORT_LOG.md
+FINAL_REPORT.md

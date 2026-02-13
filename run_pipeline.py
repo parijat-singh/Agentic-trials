@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import argparse
 
 def run_script(path, description, args=None):
     print(f"\n{'='*60}")
@@ -17,16 +18,92 @@ def run_script(path, description, args=None):
         if args:
             cmd.extend(args)
             
-        result = subprocess.run(cmd, check=True, cwd=os.path.dirname(path))
+        # Run the script and stream output
+        cmd = [sys.executable, path]
+        if args:
+            cmd.extend(args)
+            
+        # Run in the script's directory to ensure relative paths (like 'data/') work as expected by the scripts
+        result = subprocess.run(cmd, check=True, cwd=os.path.dirname(path)) 
         print(f"SUCCESS: {description}")
         return True
     except subprocess.CalledProcessError as e:
         print(f"FAILURE: {description} (Exit Code: {e.returncode})")
         return False
 
+def get_user_input(prompt, default_val, type_func=str):
+    val = input(f"{prompt} [{default_val}]: ").strip()
+    if not val:
+        return default_val
+    return type_func(val)
+
 def main():
+    parser = argparse.ArgumentParser(description="Run Full Analysis Pipeline")
+    parser.add_argument("--interactive", action="store_true", help="Ask for parameters interactively")
+    parser.add_argument("--min-history", type=float, help="Minimum years of history")
+    parser.add_argument("--min-ipo", type=float, help="Minimum years since IPO")
+    parser.add_argument("--max-ipo", type=float, help="Maximum years since IPO")
+    parser.add_argument("--max-pe", type=float, help="Maximum P/E Ratio")
+    parser.add_argument("--max-pages", type=int, default=200, help="Max pages to scan")
+    parser.add_argument("--skip-scraper", action="store_true", help="Skip the scraping step")
+    
+    args = parser.parse_args()
+    
     root_dir = os.path.dirname(os.path.abspath(__file__))
     
+    # Defaults
+    p_min_hist = 5.0
+    p_min_ipo = 5.0
+    p_max_ipo = 10.0
+    p_max_pe = None
+    p_max_pages = 200
+    
+    if args.interactive:
+        print("\n--- Pipeline Configuration ---")
+        p_min_hist = get_user_input("Minimum History (Years)", 5.0, float)
+        p_min_ipo = get_user_input("Minimum IPO Age (Years)", 5.0, float)
+        p_max_ipo = get_user_input("Maximum IPO Age (Years)", 10.0, float)
+        
+        pe_input = input("Maximum P/E Ratio (Enter for None/Disable): ").strip()
+        if pe_input:
+            p_max_pe = float(pe_input)
+        else:
+            p_max_pe = None
+            
+        p_max_pages = get_user_input("Max Pages to Scan", 200, int)
+    else:
+        # Use args if provided, else defaults
+        if args.min_history is not None: p_min_hist = args.min_history
+        if args.min_ipo is not None: p_min_ipo = args.min_ipo
+        if args.max_ipo is not None: p_max_ipo = args.max_ipo
+        if args.max_pe is not None: p_max_pe = args.max_pe
+        if args.max_pages is not None: p_max_pages = args.max_pages
+
+    # Construct Description
+    pe_desc = f", P/E < {p_max_pe}" if p_max_pe else ""
+    run_description = f"Scan (IPO {p_min_ipo}-{p_max_ipo}y, Hist {p_min_hist}y{pe_desc})"
+    
+    print(f"\nStarting Pipeline: {run_description}")
+    
+    # Scripts to run
+    
+    # 1. Scraper (Optional skip)
+    if not args.skip_scraper:
+        scraper_script = os.path.join(root_dir, "stock_agent", "market_cap_scraper.py")
+        scraper_args = [
+            f"--min-history={p_min_hist}",
+            f"--min-ipo={p_min_ipo}",
+            f"--max-ipo={p_max_ipo}",
+            f"--max-pages={p_max_pages}"
+        ]
+        if p_max_pe is not None:
+            scraper_args.append(f"--max-pe={p_max_pe}")
+            
+        if not run_script(scraper_script, "Module 1: Stock Scraper", args=scraper_args):
+             print("Pipeline interrupted at Scraper.")
+             sys.exit(1)
+
+    # 2. Other Modules
     scripts = [
         (os.path.join(root_dir, "financial_engine", "main.py"), "Module 2: Financial Engine (Sharpe Ranking)"),
         (os.path.join(root_dir, "portfolio_optimizer", "main.py"), "Module 3: Portfolio Optimization"),
@@ -34,23 +111,17 @@ def main():
         (os.path.join(root_dir, "report_generator", "create_report.py"), "Final Reporting")
     ]
     
-    # Check for custom description
-    description = "Standard Pipeline Run"
-    if len(sys.argv) > 1:
-        description = sys.argv[1]
-        
-    print(f"Starting Full Analysis Pipeline... (Description: {description})")
-    
     for script_path, desc in scripts:
-        # Special handling for report generator to pass description
         if "create_report.py" in script_path:
-             if not run_script(script_path, desc, args=[description]):
-                print("Pipeline interrupted due to failure.")
-                break
+             # Pass the run description to the report generator logic if needed
+             # Currently create_report checks sys.argv[1] for criteria description
+             if not run_script(script_path, desc, args=[run_description]):
+                print("Pipeline interrupted.")
+                sys.exit(1)
         else:
             if not run_script(script_path, desc):
-                print("Pipeline interrupted due to failure.")
-                break
+                print("Pipeline interrupted.")
+                sys.exit(1)
             
     print("\nPipeline Execution Complete.")
 
