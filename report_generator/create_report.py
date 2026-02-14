@@ -8,15 +8,19 @@ import shutil
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 
-FILE_TOP_100 = os.path.join(ROOT_DIR, "stock_agent", "data", "top_100_new_stocks.csv")
-FILE_STATS = os.path.join(ROOT_DIR, "stock_agent", "scraping_stats.json")
+import sys
+sys.path.append(ROOT_DIR)
+import config
+DATA_DIR = config.DATA_DIR
+ARCHIVE_DIR = config.ARCHIVE_DIR
+
+FILE_TOP_100 = os.path.join(DATA_DIR, "top_100_new_stocks.csv")
+FILE_STATS = os.path.join(DATA_DIR, "scraping_stats.json")
 FILE_TOP_50 = os.path.join(ROOT_DIR, "financial_engine", "top_50_stocks.csv")
 FILE_OPTIMAL = os.path.join(ROOT_DIR, "portfolio_optimizer", "optimal_portfolio.csv")
 FILE_BACKTEST = os.path.join(ROOT_DIR, "backtester", "best_3y_combination.csv")
 OUTPUT_FILE = os.path.join(ROOT_DIR, "FINAL_REPORT.md")
-ARCHIVE_DIR = os.path.join(ROOT_DIR, "reports_archive")
 LOG_FILE = os.path.join(ROOT_DIR, "REPORT_LOG.md")
-DATA_DIR = os.path.join(ROOT_DIR, "stock_agent", "data")
 
 import json
 
@@ -72,6 +76,11 @@ def get_waterfall_section():
          # Need to handle if "Skipped_PE" key exists, else 0
          count_skipped_pe = stats.get("Skipped_PE", 0)
          md += f"| *Filter: P/E Ratio* | {pe_desc} | -{count_skipped_pe} |\n"
+
+    p_min_cap = params.get("Min_Market_Cap", None)
+    if p_min_cap:
+        count_skipped_cap = stats.get("Skipped_Market_Cap", 0)
+        md += f"| *Filter: Market Cap* | Cap < ${p_min_cap}B | -{count_skipped_cap} |\n"
          
     md += f"| *Filter: Errors* | Data fetch errors | -{count_errors} |\n"
     md += f"| **2. Candidates** | Passed all criteria | **{count_selected}** |\n"
@@ -227,14 +236,24 @@ def format_metrics_table(metrics):
     if not metrics:
         return "Insufficient data for yearly analysis.\n"
     
-    table = "| Year | Return | Volatility | Sharpe Ratio | Alpha | Beta |\n"
-    table += "|:---|---:|---:|---:|---:|---:|\n"
+    # Define widths
+    w_year = 6
+    w_ret = 10
+    w_vol = 12
+    w_sharpe = 14
+    w_alpha = 10
+    w_beta = 8
+    
+    # Header
+    table = f"| {'Year':<{w_year}} | {'Return':>{w_ret}} | {'Volatility':>{w_vol}} | {'Sharpe Ratio':>{w_sharpe}} | {'Alpha':>{w_alpha}} | {'Beta':>{w_beta}} |\n"
+    table += f"|:{'-'*(w_year)}|{'-'*(w_ret+1)}:|{'-'*(w_vol+1)}:|{'-'*(w_sharpe+1)}:|{'-'*(w_alpha+1)}:|{'-'*(w_beta+1)}:|\n"
+    
     for year in sorted(metrics.keys(), reverse=True):
         m = metrics[year]
         alpha_str = f"{m['Alpha']:.2%}" if not np.isnan(m['Alpha']) else "N/A"
         beta_str = f"{m['Beta']:.2f}" if not np.isnan(m['Beta']) else "N/A"
         
-        table += f"| **{year}** | {m['Return']:.2%} | {m['Volatility']:.2%} | {m['Sharpe']:.2f} | {alpha_str} | {beta_str} |\n"
+        table += f"| {year:<{w_year}} | {m['Return']:>{w_ret}.2%} | {m['Volatility']:>{w_vol}.2%} | {m['Sharpe']:>{w_sharpe}.2f} | {alpha_str:>{w_alpha}} | {beta_str:>{w_beta}} |\n"
     return table + "\n"
 
 # ... (Rest of format functions) ...
@@ -355,13 +374,18 @@ def generate_markdown(criteria_description="Default Run"):
     report_content += f"**Criteria:** {criteria_description}\n\n"
     
     # Run Configuration Section
+    p_min_cap = params.get("Min_Market_Cap", "Disabled")
+    if p_min_cap is None: p_min_cap = "Disabled"
+    else: p_min_cap = f"${p_min_cap}B"
+
     report_content += "### Run Configuration\n"
     report_content += "| Parameter | Value |\n"
     report_content += "|:---|:---|\n"
     report_content += f"| **Min Trading History** | {p_min_hist} Years |\n"
     report_content += f"| **Min IPO Age** | {p_min_ipo} Years |\n"
     report_content += f"| **Max IPO Age** | {p_max_ipo} Years |\n"
-    report_content += f"| **Max P/E Ratio** | {p_max_pe} |\n\n"
+    report_content += f"| **Max P/E Ratio** | {p_max_pe} |\n"
+    report_content += f"| **Min Market Cap** | {p_min_cap} |\n\n"
     
     report_content += "---\n\n"
     

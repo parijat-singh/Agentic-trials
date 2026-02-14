@@ -3,12 +3,13 @@ import os
 import sys
 
 # Add sibling directory to path to import risk_free_rate from previous module
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'financial_engine'))
-import risk_free_rate
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from financial_engine import risk_free_rate
+import config
 
 # Constants
 TOP_50_FILE = os.path.join("..", "financial_engine", "top_50_stocks.csv")
-DATA_DIR = os.path.join("..", "stock_agent", "data")
+DATA_DIR = config.DATA_DIR
 OUTPUT_FILE = "optimal_portfolio.csv"
 
 def main():

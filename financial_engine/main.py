@@ -2,9 +2,14 @@ import risk_free_rate
 import sharpe_ranker
 import os
 import pandas as pd
+import sys
+
+# Add parent directory to path to import config
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+import config
 
 # Constants
-DATA_DIR = os.path.join("..", "stock_agent", "data")
+DATA_DIR = config.DATA_DIR
 OUTPUT_FILE = "top_50_stocks.csv"
 
 def main():

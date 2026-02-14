@@ -30,6 +30,7 @@ class AnalyzeRequest(BaseModel):
     min_history: float = 5.0
     min_ipo: float = 5.0
     max_ipo: float = 10.0
+    min_market_cap: Optional[float] = None
     max_pe: Optional[float] = None
     max_pages: int = 200
     skip_scraper: bool = False
@@ -43,6 +44,8 @@ def run_pipeline_background(cmd, cwd):
     state.logs = []
     state.return_code = None
     
+    log_file_path = os.path.join(cwd, "pipeline.log")
+    
     try:
         # Cleanup old report
         report_path = os.path.join(cwd, "FINAL_REPORT.md")
@@ -50,43 +53,57 @@ def run_pipeline_background(cmd, cwd):
             try: os.remove(report_path)
             except: pass
 
-        # Start Process with pipes for stdout/stderr
-        # bufsize=1 means line buffered
-        p = subprocess.Popen(
-            cmd, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.STDOUT, 
-            text=True, 
-            cwd=cwd,
-            bufsize=1,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-        )
-        state.process = p
-        
-        # Read logs line by line
-        for line in iter(p.stdout.readline, ''):
-            if line:
-                state.logs.append(line)
-                # Keep logs manageable? 
-                # For now, keep all. 
-                
-        p.stdout.close()
-        return_code = p.wait()
-        state.return_code = return_code
-        state.process = None
-        
-        if return_code == 0:
-            state.status = "completed"
-            state.logs.append(f"\n[API] Pipeline finished successfully.\n")
-        else:
-            # Check if it was killed manually
-            if return_code == 15 or return_code == 1: # SIGTERM or Error
-                 state.status = "error" # Or stopped?
-                 state.logs.append(f"\n[API] Pipeline finished with exit code {return_code}.\n")
+        # Open log file
+        with open(log_file_path, "w") as log_file:
+            log_file.write(f"--- Pipeline Started at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+            log_file.flush()
+            
+            # Start Process with pipes for stdout/stderr
+            # bufsize=1 means line buffered
+            p = subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True, 
+                cwd=cwd,
+                bufsize=1,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+            )
+            state.process = p
+            
+            # Read logs line by line
+            for line in iter(p.stdout.readline, ''):
+                if line:
+                    state.logs.append(line)
+                    log_file.write(line)
+                    log_file.flush() # Ensure it's written immediately
+                    
+            p.stdout.close()
+            return_code = p.wait()
+            state.return_code = return_code
+            state.process = None
+            
+            if return_code == 0:
+                state.status = "completed"
+                msg = f"\n[API] Pipeline finished successfully.\n"
+                state.logs.append(msg)
+                log_file.write(msg)
+            else:
+                # Check if it was killed manually
+                if return_code == 15 or return_code == 1: # SIGTERM or Error
+                     state.status = "error" # Or stopped?
+                     msg = f"\n[API] Pipeline finished with exit code {return_code}.\n"
+                     state.logs.append(msg)
+                     log_file.write(msg)
 
     except Exception as e:
         state.status = "error"
-        state.logs.append(f"\n[API] Error launching process: {str(e)}\n")
+        msg = f"\n[API] Error launching process: {str(e)}\n"
+        state.logs.append(msg)
+        try:
+            with open(log_file_path, "a") as lf:
+                lf.write(msg)
+        except: pass
         state.process = None
 
 @app.post("/analyze")
@@ -101,7 +118,7 @@ def run_analysis(request: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="Pipeline is already running.")
         
     # Construct command
-    cmd = [sys.executable, "run_pipeline.py"]
+    cmd = [sys.executable, "-u", "run_pipeline.py"]
     
     cmd.append(f"--min-history={request.min_history}")
     cmd.append(f"--min-ipo={request.min_ipo}")
@@ -110,6 +127,9 @@ def run_analysis(request: AnalyzeRequest):
     
     if request.max_pe is not None:
         cmd.append(f"--max-pe={request.max_pe}")
+
+    if request.min_market_cap is not None:
+        cmd.append(f"--min-market-cap={request.min_market_cap}")
         
     if request.skip_scraper:
         cmd.append("--skip-scraper")

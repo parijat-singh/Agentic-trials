@@ -11,7 +11,8 @@ def load_3y_data(data_dir):
     Returns: DataFrame of prices (Forward Filled).
     """
     # Use metadata file source of truth
-    meta_file = os.path.join(data_dir, "..", "top_100_new_stocks.csv")
+    # Use metadata file source of truth
+    meta_file = os.path.join(data_dir, "top_100_new_stocks.csv")
     if os.path.exists(meta_file):
         meta_df = pd.read_csv(meta_file)
         if 'symbol' in meta_df.columns:

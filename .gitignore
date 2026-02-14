@@ -1,17 +1,9 @@
 __pycache__/
-*.pyc
-.DS_Store
-.vscode/
-.idea/
-
-# Data and Artifacts
-stock_agent/data/
-stock_agent/scraping_stats.json
-scraping_stats.json
-top_100_new_stocks.csv
-financial_engine/top_50_stocks.csv
-portfolio_optimizer/optimal_portfolio.csv
-backtester/best_3y_combination.csv
+*.csv
+*.json
+*.log
+data/
 reports_archive/
-REPORT_LOG.md
+pipeline.log
 FINAL_REPORT.md
+REPORT_LOG.md

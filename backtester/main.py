@@ -1,8 +1,13 @@
 import backtest_engine
 import os
 import pandas as pd
+import sys
 
-DATA_DIR = os.path.join("..", "stock_agent", "data")
+# Add parent directory to path to import config
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+import config
+
+DATA_DIR = config.DATA_DIR
 OUTPUT_FILE = "best_3y_combination.csv"
 
 def main():

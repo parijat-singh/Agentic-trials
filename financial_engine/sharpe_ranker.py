@@ -43,7 +43,8 @@ def rank_stocks(data_dir, risk_free_rate):
     results = []
     
     # Load symbols from metadata file (US Filter source of truth)
-    meta_file = os.path.join(data_dir, "..", "top_100_new_stocks.csv")
+    # Load symbols from metadata file (US Filter source of truth)
+    meta_file = os.path.join(data_dir, "top_100_new_stocks.csv")
     if os.path.exists(meta_file):
         meta_df = pd.read_csv(meta_file)
         # Assuming column is 'symbol' or 'Symbol' (check case)

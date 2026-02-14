@@ -2,6 +2,8 @@ import os
 import subprocess
 import sys
 import argparse
+import shutil
+import config
 
 def run_script(path, description, args=None):
     print(f"\n{'='*60}")
@@ -18,17 +20,15 @@ def run_script(path, description, args=None):
         if args:
             cmd.extend(args)
             
-        # Run the script and stream output
-        cmd = [sys.executable, path]
-        if args:
-            cmd.extend(args)
-            
         # Run in the script's directory to ensure relative paths (like 'data/') work as expected by the scripts
         result = subprocess.run(cmd, check=True, cwd=os.path.dirname(path)) 
-        print(f"SUCCESS: {description}")
+        print(f"SUCCESS: {description}", flush=True)
         return True
     except subprocess.CalledProcessError as e:
-        print(f"FAILURE: {description} (Exit Code: {e.returncode})")
+        print(f"FAILURE: {description} (Exit Code: {e.returncode})", flush=True)
+        return False
+    except Exception as e:
+        print(f"ERROR: {description} (Exception: {str(e)})", flush=True)
         return False
 
 def get_user_input(prompt, default_val, type_func=str):
@@ -44,6 +44,7 @@ def main():
     parser.add_argument("--min-ipo", type=float, help="Minimum years since IPO")
     parser.add_argument("--max-ipo", type=float, help="Maximum years since IPO")
     parser.add_argument("--max-pe", type=float, help="Maximum P/E Ratio")
+    parser.add_argument("--min-market-cap", type=float, help="Minimum Market Cap in Billions")
     parser.add_argument("--max-pages", type=int, default=200, help="Max pages to scan")
     parser.add_argument("--skip-scraper", action="store_true", help="Skip the scraping step")
     
@@ -96,6 +97,15 @@ def main():
     
     # 1. Scraper (Optional skip)
     if not args.skip_scraper:
+        # Clean previous data
+        print(f"Cleaning data directory: {config.DATA_DIR}")
+        if os.path.exists(config.DATA_DIR):
+            try:
+                shutil.rmtree(config.DATA_DIR)
+                os.makedirs(config.DATA_DIR)
+            except Exception as e:
+                print(f"Warning: Failed to clean data directory: {e}")
+                
         scraper_script = os.path.join(root_dir, "stock_agent", "market_cap_scraper.py")
         scraper_args = [
             f"--min-history={p_min_hist}",
@@ -105,6 +115,9 @@ def main():
         ]
         if p_max_pe is not None:
             scraper_args.append(f"--max-pe={p_max_pe}")
+
+        if args.min_market_cap is not None:
+             scraper_args.append(f"--min-market-cap={args.min_market_cap}")
             
         if not run_script(scraper_script, "Module 1: Stock Scraper", args=scraper_args):
              print("Pipeline interrupted at Scraper.")

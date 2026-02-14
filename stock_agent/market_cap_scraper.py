@@ -9,9 +9,14 @@ import yfinance as yf
 import json
 import argparse
 import sys
+import os
+
+# Add parent directory to path to import config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import config
 
 # Global Constants
-DATA_DIR = "data"
+DATA_DIR = config.DATA_DIR
 
 def get_companies_from_page(page_num):
     """
@@ -96,10 +101,33 @@ def get_pe_ratio(symbol):
     except Exception:
         return None
 
-def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe):
+def parse_market_cap(mcap_str):
+    """
+    Parses market cap string like '$1.5 B', '$500 M' to Billions (float).
+    Returns None if parsing fails.
+    """
+    if not mcap_str or mcap_str == 'N/A':
+        return None
+        
+    try:
+        # Remove '$' and spacing
+        clean_str = mcap_str.replace('$', '').strip()
+        
+        if clean_str.endswith('B'):
+            return float(clean_str[:-1].strip())
+        elif clean_str.endswith('T'):
+            return float(clean_str[:-1].strip()) * 1000
+        elif clean_str.endswith('M'):
+            return float(clean_str[:-1].strip()) / 1000
+        else:
+            return 0.0 # Unknown or small
+    except:
+        return None
+
+def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_market_cap=None):
     """
     Takes a list of company dicts.
-    Filters by Date and P/E.
+    Filters by Market Cap (Pre-fetch), Date and P/E (Post-fetch).
     """
     # Filters
     
@@ -120,18 +148,33 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe):
     # To pass Filter A (History): Start <= max_start_date_history
     # To pass Filter B (IPO Window): min_start_date_ipo <= Start <= max_start_date_ipo
     
-    # 1. pre-filter symbols (US Only)
+    # 1. pre-filter symbols (US Only AND Market Cap)
     candidates = []
     skipped_non_us = 0
+    skipped_mcap = 0
     
+    stop_scan = False
     for c in companies:
+        # Market Cap Check
+        if min_market_cap is not None:
+            mcap_val = parse_market_cap(c.get('market_cap'))
+            if mcap_val is not None and mcap_val < min_market_cap:
+                skipped_mcap += 1
+                stop_scan = True
+                print(f"DEBUG: Scraper Stop Condition Met: {c['symbol']} Market Cap {mcap_val} < {min_market_cap}")
+                break # Stop processing this batch
+                
+            if mcap_val is None:
+                # Can't parse, just skip or continue? 
+                continue
+
         if is_likely_us_stock(c['symbol']):
             candidates.append(c)
         else:
             skipped_non_us += 1
             
     if not candidates:
-        return [], {"Non_US": skipped_non_us}
+        return [], {"Non_US": skipped_non_us}, stop_scan
         
     symbols = [c['symbol'] for c in candidates]
     
@@ -141,7 +184,7 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe):
         data = yf.download(symbols, period="max", group_by='ticker', auto_adjust=True, progress=False)
     except Exception as e:
         print(f"Batch download failed: {e}")
-        return [], {"Errors": len(symbols)}
+        return [], {"Errors": len(symbols)}, stop_scan
 
     accepted = []
     stats = {
@@ -150,6 +193,7 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe):
         "Too_Old": 0, # IPO > Max Age
         "Too_New": 0, # IPO < Min Age (or History < Min History)
         "Skipped_PE": 0,
+        "Skipped_Market_Cap": skipped_mcap,
         "Errors": 0,
         "Selected": 0
     }
@@ -231,7 +275,7 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe):
         except Exception as e:
             stats["Errors"] += 1
             
-    return accepted, stats
+    return accepted, stats, stop_scan
 
 def main():
     parser = argparse.ArgumentParser(description="Scrape US Stocks with Filters")
@@ -239,11 +283,12 @@ def main():
     parser.add_argument("--min-ipo", type=float, default=5, help="Minimum years since IPO")
     parser.add_argument("--max-ipo", type=float, default=10, help="Maximum years since IPO")
     parser.add_argument("--max-pe", type=float, default=None, help="Maximum P/E Ratio (None to disable)")
+    parser.add_argument("--min-market-cap", type=float, default=None, help="Minimum Market Cap in Billions")
     parser.add_argument("--max-pages", type=int, default=200, help="Max pages to scan")
     
     args = parser.parse_args()
     
-    print(f"=== Stock Data Agent: Scan (IPO {args.min_ipo}-{args.max_ipo}y, History {args.min_history}y, P/E < {args.max_pe}) ===")
+    print(f"=== Stock Data Agent: Scan (IPO {args.min_ipo}-{args.max_ipo}y, Hist {args.min_history}y, P/E < {args.max_pe}, Cap > {args.min_market_cap}B) ===")
     
     collected_stocks = []
     
@@ -253,6 +298,7 @@ def main():
         "Too_Old": 0,
         "Too_New": 0,
         "Skipped_PE": 0,
+        "Skipped_Market_Cap": 0,
         "Errors": 0,
         "Selected": 0
     }
@@ -270,7 +316,7 @@ def main():
             
         print(f"Found {len(companies)} companies. Checking filters...", flush=True)
         
-        accepted_batch, batch_stats = process_batch(companies, args.min_history, args.min_ipo, args.max_ipo, args.max_pe)
+        accepted_batch, batch_stats, stop_scan = process_batch(companies, args.min_history, args.min_ipo, args.max_ipo, args.max_pe, args.min_market_cap)
         
         for k, v in batch_stats.items():
             if k in total_stats:
@@ -282,6 +328,10 @@ def main():
         
         print(f"Batch Result: {len(accepted_batch)} matches. Total Collected: {len(collected_stocks)}", flush=True)
         
+        if stop_scan:
+            print(f"Min Market Cap {args.min_market_cap}B reached. Stopping scan.")
+            break
+            
         page += 1
         time.sleep(1) 
         
@@ -289,18 +339,19 @@ def main():
     print("Final Stats:", json.dumps(total_stats, indent=2))
     
     df_meta = pd.DataFrame(collected_stocks)
-    df_meta.to_csv("top_100_new_stocks.csv", index=False)
+    df_meta.to_csv(os.path.join(DATA_DIR, "top_100_new_stocks.csv"), index=False)
     
     # Save Stats for Waterfall
     total_stats["Parameters"] = {
         "Min_History": args.min_history,
         "Min_IPO": args.min_ipo,
         "Max_IPO": args.max_ipo,
-        "Max_PE": args.max_pe
+        "Max_PE": args.max_pe,
+        "Min_Market_Cap": args.min_market_cap
     }
     
     print(f"DEBUG: Saving stats with parameters: {total_stats['Parameters']}")
-    with open("scraping_stats.json", "w") as f:
+    with open(os.path.join(DATA_DIR, "scraping_stats.json"), "w") as f:
         json.dump(total_stats, f, indent=2)
         
     print("Metadata saved to 'top_100_new_stocks.csv'. Stats to 'scraping_stats.json'.")
