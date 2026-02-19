@@ -191,4 +191,4 @@ def stop_process():
 if __name__ == "__main__":
     import uvicorn
     # Run slightly different port to avoid conflicts
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8081)

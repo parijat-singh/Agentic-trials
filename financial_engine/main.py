@@ -28,13 +28,14 @@ def main():
         
     top_50 = sharpe_ranker.rank_stocks(DATA_DIR, rf_rate)
     
-    if top_50.empty:
-        print("No stocks passed filtering.")
-        return
-        
     # 3. Save Results
     print(f"\n--- Step 3: Saving Top 50 to {OUTPUT_FILE} ---")
     top_50.to_csv(OUTPUT_FILE, index=False)
+    
+    if top_50.empty:
+        print("No stocks passed filtering. Output cleared.")
+        return
+    
     print("Success!")
     
     # 4. Preview

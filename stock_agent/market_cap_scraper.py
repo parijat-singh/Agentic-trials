@@ -128,25 +128,22 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
     """
     Takes a list of company dicts.
     Filters by Market Cap (Pre-fetch), Date and P/E (Post-fetch).
+    Uses SQLite DB to store/retrieve historical data, speeding up subsequent runs.
     """
-    # Filters
-    
-    # IPO Window: 
-    # Must have started BEFORE (Today - Min Age)
-    # Must have started AFTER (Today - Max Age)
-    
-    # History:
-    # Must have started BEFORE (Today - Min History)
+    try:
+        from db_manager import DBManager
+    except ImportError:
+        # Fallback if running as script from a different dir
+        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+        from db_manager import DBManager
+
+    db = DBManager()
     
     today = datetime.now()
     max_start_date_history = today - timedelta(days=int(min_history*365))
     
     max_start_date_ipo = today - timedelta(days=int(min_ipo_age*365))
     min_start_date_ipo = today - timedelta(days=int(max_ipo_age*365))
-    
-    # Combined Date Logic:
-    # To pass Filter A (History): Start <= max_start_date_history
-    # To pass Filter B (IPO Window): min_start_date_ipo <= Start <= max_start_date_ipo
     
     # 1. pre-filter symbols (US Only AND Market Cap)
     candidates = []
@@ -155,17 +152,15 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
     
     stop_scan = False
     for c in companies:
-        # Market Cap Check
         if min_market_cap is not None:
             mcap_val = parse_market_cap(c.get('market_cap'))
             if mcap_val is not None and mcap_val < min_market_cap:
                 skipped_mcap += 1
                 stop_scan = True
                 print(f"DEBUG: Scraper Stop Condition Met: {c['symbol']} Market Cap {mcap_val} < {min_market_cap}")
-                break # Stop processing this batch
+                break 
                 
             if mcap_val is None:
-                # Can't parse, just skip or continue? 
                 continue
 
         if is_likely_us_stock(c['symbol']):
@@ -176,95 +171,152 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
     if not candidates:
         return [], {"Non_US": skipped_non_us}, stop_scan
         
-    symbols = [c['symbol'] for c in candidates]
+    # 2. Batch Download Strategy
+    # Separation into: 
+    # A) Fresh Download (Not in DB)
+    # B) Incremental Update (In DB, needs latest data)
     
-    # 2. Batch Download History
-    print(f"Downloading batch of {len(symbols)} stocks...", flush=True)
-    try:
-        data = yf.download(symbols, period="max", group_by='ticker', auto_adjust=True, progress=False)
-    except Exception as e:
-        print(f"Batch download failed: {e}")
-        return [], {"Errors": len(symbols)}, stop_scan
+    symbols_fresh = []
+    symbols_update = {} # date_str -> list of symbols
+    
+    # We will load data into this map to process filters later
+    # Format: {symbol: dataframe}
+    data_map = {} 
+    
+    print(f"Checking local database for {len(candidates)} candidates...", flush=True)
+    
+    for c in candidates:
+        sym = c['symbol']
+        last_date = db.get_latest_date(sym)
+        
+        if last_date:
+            # Check if we need to update
+            # If last_date is yesterday or today, we are good.
+            # If last_date < today - 1 day, we download.
+            # Actually, just download from last_date + 1 day
+            
+            # Load what we have
+            df_existing = db.load_history(sym)
+            data_map[sym] = df_existing
+            
+            next_day = last_date + timedelta(days=1)
+            if next_day.date() <= today.date():
+                date_str = next_day.strftime('%Y-%m-%d')
+                if date_str not in symbols_update:
+                    symbols_update[date_str] = []
+                symbols_update[date_str].append(sym)
+        else:
+            symbols_fresh.append(sym)
+            
+    # Execute Fresh Downloads
+    if symbols_fresh:
+        print(f"Downloading full history for {len(symbols_fresh)} new stocks...", flush=True)
+        try:
+            # Use 'max' for fresh
+            data = yf.download(symbols_fresh, period="max", group_by='ticker', auto_adjust=True, progress=False, threads=True)
+            
+            # Save to DB and Update data_map
+            if len(symbols_fresh) == 1:
+                # data is single DF
+                sym = symbols_fresh[0]
+                if not data.empty:
+                    db.save_history(sym, data)
+                    data_map[sym] = data # Use the new data
+            else:
+                for sym in symbols_fresh:
+                    if sym in data.columns.levels[0]:
+                        df = data[sym].dropna(how='all')
+                        if not df.empty:
+                            db.save_history(sym, df)
+                            data_map[sym] = df
+        except Exception as e:
+            print(f"Fresh batch download failed: {e}")
 
+    # Execute Updates
+    if symbols_update:
+        print(f"Updating {sum(len(v) for v in symbols_update.values())} stocks with new data...", flush=True)
+        for start_date, syms in symbols_update.items():
+            try:
+                # If start date is in future (e.g. today is Sat, last data Fri), yf might return empty.
+                data = yf.download(syms, start=start_date, group_by='ticker', auto_adjust=True, progress=False, threads=True)
+                
+                # Save to DB and Update data_map
+                if len(syms) == 1:
+                    sym = syms[0]
+                    if not data.empty:
+                        db.save_history(sym, data)
+                        # Merge with existing in data_map
+                        if sym in data_map:
+                            data_map[sym] = pd.concat([data_map[sym], data])
+                            data_map[sym] = data_map[sym][~data_map[sym].index.duplicated(keep='last')]
+                else:
+                    for sym in syms:
+                        if sym in data.columns.levels[0]:
+                            df = data[sym].dropna(how='all')
+                            if not df.empty:
+                                db.save_history(sym, df)
+                                if sym in data_map:
+                                    data_map[sym] = pd.concat([data_map[sym], df])
+                                    data_map[sym] = data_map[sym][~data_map[sym].index.duplicated(keep='last')]
+            except Exception as e:
+                print(f"Update batch ({start_date}) failed: {e}")
+
+    # 3. Process Logic
     accepted = []
     stats = {
         "Scanned": len(companies),
         "Non_US": skipped_non_us,
-        "Too_Old": 0, # IPO > Max Age
-        "Too_New": 0, # IPO < Min Age (or History < Min History)
+        "Too_Old": 0, 
+        "Too_New": 0, 
         "Skipped_PE": 0,
         "Skipped_Market_Cap": skipped_mcap,
         "Errors": 0,
         "Selected": 0
     }
     
-    # 3. Process each ticker
     for c in candidates:
         sym = c['symbol']
-        try:
-            # dataframe extraction
-            if len(symbols) == 1:
-                df = data
-            else:
-                if sym not in data.columns.levels[0]:
-                    stats["Errors"] += 1
-                    continue
-                df = data[sym]
+        
+        # Get dataframe from map
+        df = data_map.get(sym)
+        
+        if df is None or df.empty:
+            stats["Errors"] += 1
+            continue
             
-            if df.empty:
-                stats["Errors"] += 1
-                continue
-                
-            df = df.dropna(how='all')
-            if df.empty:
-                stats["Errors"] += 1
-                continue
-                
+        try:
             start_date = df.index[0]
             if start_date.tzinfo:
                 start_date = start_date.tz_localize(None)
                 
-            # Date Logic
-            # Note: We are looking for "IPO between 5 and 10 years ago"
-            # AND "Trading history > 5 years"
-            # Effectively, if Min History == Min IPO Age, these checks overlap efficiently.
-            
-            # Check 1: Is it too new? (IPO'd recently)
-            # Start Date > (Today - Min IPO Age)
+            # Date Checks
             if start_date > max_start_date_ipo: 
                 stats["Too_New"] += 1 
                 continue
 
-            # Check 2: Is it too old? (IPO'd long ago)
-            # Start Date < (Today - Max IPO Age)
             if start_date < min_start_date_ipo:
                 stats["Too_Old"] += 1
                 continue
                 
-            # Check 3: History length (Redundant if Min History <= Min IPO Age, but good for explicit check)
             if start_date > max_start_date_history:
                  stats["Too_New"] += 1
                  continue
             
-            # --- DATE CHECKS PASSED ---
-            
-            # Check 4: P/E Ratio (if enabled)
+            # P/E Check (Fetch always for downstream, filter if requested)
+            pe = get_pe_ratio(sym)
             if max_pe is not None:
-                pe = get_pe_ratio(sym)
-                if pe is None or pe > max_pe or pe < 0: # Assuming we want positive P/E for "value"? Or just < max. 
-                    # Let's assume < Max. If None (no earnings), skip? Yes, safer.
+                if pe is None or pe > max_pe or pe < 0:
                     stats["Skipped_PE"] += 1
                     continue
             
-            # MATCH!
+            # Accepted
             c['start_date'] = str(start_date.date())
-            if max_pe is not None:
-                c['pe_ratio'] = pe 
+            c['pe_ratio'] = pe 
                 
             accepted.append(c)
             stats["Selected"] += 1
             
-            # Save CSV
+            # Save CSV for downstream modules (Backwards Compatibility)
             if not os.path.exists(DATA_DIR):
                 os.makedirs(DATA_DIR)
             df.to_csv(f"{DATA_DIR}/{sym}.csv")
@@ -273,6 +325,7 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
             print(f"[MATCH] {sym}: Started {start_date.date()} (Cap: {c['market_cap']}){pe_str}", flush=True)
 
         except Exception as e:
+            print(f"Error processing {sym}: {e}")
             stats["Errors"] += 1
             
     return accepted, stats, stop_scan

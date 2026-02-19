@@ -197,9 +197,21 @@ def calculate_metrics(portfolio_weights, price_data, benchmark_symbol='SPY'):
         year_returns = portfolio_daily_ret.loc[idx]
         if len(year_returns) < 10: continue
             
+        # Geometric return compounding with safety jump check
         total_ret = (1 + year_returns).prod() - 1
+        
+        # Stability check: handle inf/nan immediately
+        if np.isinf(total_ret) or np.isnan(total_ret):
+            print(f"WARNING: Year {year} return overflow detected. Capping at 10,000x jump.")
+            total_ret = 10000.0 # Extreme fallback cap 
+            
         vol = year_returns.std() * np.sqrt(252)
-        sharpe = ((year_returns.mean() - daily_rf) * 252) / vol if vol != 0 else 0
+        
+        # Stability check: avoid divide by zero Sharpes
+        if vol < 1e-6 or np.isnan(vol):
+            sharpe = 0.0
+        else:
+            sharpe = ((year_returns.mean() - daily_rf) * 252) / vol
         
         # Alpha / Beta
         alpha = np.nan
@@ -214,14 +226,23 @@ def calculate_metrics(portfolio_weights, price_data, benchmark_symbol='SPY'):
                 cov = cov_matrix[0, 1]
                 var_bench = np.var(year_bench, ddof=1)
                 
-                if var_bench > 0:
-                    beta = cov / var_bench
-                    # Alpha = Rp - (Rf + Beta * (Rm - Rf)) -> Daily then annualize? or just Annual inputs?
-                    # Using Annualized Return for Alpha approximation
+                if var_bench > 1e-9:
+                    # Covariance stability
+                    if np.isnan(cov) or np.isinf(cov):
+                         beta = 0.0
+                    else:
+                        beta = cov / var_bench
+                        
+                    # Alpha = Rp - (Rf + Beta * (Rm - Rf)) 
                     bench_total_ret = (1 + year_bench).prod() - 1
-                    alpha = total_ret - (rf_rate + beta * (bench_total_ret - rf_rate))
+                    
+                    # Handle bench infinity
+                    if np.isinf(bench_total_ret) or np.isnan(bench_total_ret):
+                         alpha = np.nan
+                    else:
+                         alpha = total_ret - (rf_rate + beta * (bench_total_ret - rf_rate))
                 else:
-                    print(f"DEBUG: var_bench <= 0: {var_bench}", flush=True)
+                    print(f"DEBUG: var_bench too small: {var_bench}", flush=True)
         
         results[year] = {
             "Return": total_ret,
@@ -392,6 +413,25 @@ def generate_markdown(criteria_description="Default Run"):
     # Waterfall Section
     report_content += get_waterfall_section()
     
+    # Top 10 Exclusion Section
+    top_10_file = os.path.join(DATA_DIR, "top_10_exclusion.json")
+    if os.path.exists(top_10_file):
+        try:
+            with open(top_10_file, 'r') as f:
+                data = json.load(f)
+            
+            report_content += "## Top 10 Market Cap Companies Analysis\n"
+            report_content += "**Why they are (or are not) in the portfolio:**\n\n"
+            report_content += "| Rank | Symbol | Name | Status/Reason |\n"
+            report_content += "|:---:|:---:|:---|:---|\n"
+            
+            for item in data:
+                report_content += f"| {item['Rank']} | {item['Symbol']} | {item['Name']} | {item['Reason']} |\n"
+            
+            report_content += "\n---\n\n"
+        except Exception as e:
+            print(f"Error adding Top 10 section: {e}")
+    
     # Section 1
     report_content += "## 1. Candidate Selection (Module 1)\n"
     if os.path.exists(FILE_TOP_100):
@@ -448,9 +488,19 @@ def generate_markdown(criteria_description="Default Run"):
 
         df['Weight_Fmt'] = df['Weight'].apply(lambda x: f"{x:.2%}" if isinstance(x, float) else x)
         
+        # Format Contribution Metrics if present
+        if 'Return Contrib' in df.columns:
+            df['Ret.Stream'] = df['Return Contrib'].apply(lambda x: f"{x:.2%}" if pd.notnull(x) else "")
+        if 'Risk Contrib' in df.columns:
+            df['Risk.Alloc'] = df['Risk Contrib'].apply(lambda x: f"{x:.2%}" if pd.notnull(x) else "")
+        if 'Correlation' in df.columns:
+            df['Corr. vs Port'] = df['Correlation'].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
+            
         # Select columns directly
-        cols_to_show = ['Symbol', 'Weight_Fmt', 'P/E', 'PEG', 'P/B']
-        # Check if they exist (in case df was empty)
+        # Added Contribution metrics to explain "Why Included"
+        cols_to_show = ['Symbol', 'Weight_Fmt', 'Ret.Stream', 'Risk.Alloc', 'Corr. vs Port', 'P/E', 'PEG']
+        
+        # Check if they exist (in case df was empty or old CSV)
         cols_to_show = [c for c in cols_to_show if c in df.columns]
         
         report_content += df[cols_to_show].rename(columns={'Weight_Fmt': 'Weight'}).to_markdown(index=False) + "\n\n"

@@ -93,6 +93,34 @@ def main():
     
     start_time = time.time()
     
+    # Save parameters to stats file so downstream modules (like Financial Engine) can see them
+    # This is crucial when --skip-scraper is used but we still want to enforce current filter criteria
+    stats_path = os.path.join(config.DATA_DIR, "scraping_stats.json")
+    stats = {}
+    if os.path.exists(stats_path):
+        try:
+            with open(stats_path, 'r') as f:
+                stats = json.load(f)
+        except: pass
+    
+    # Update only the parameters section
+    stats["Parameters"] = {
+        "Min_History": p_min_hist,
+        "Min_IPO": p_min_ipo,
+        "Max_IPO": p_max_ipo,
+        "Max_PE": p_max_pe,
+        "Min_Market_Cap": args.min_market_cap,
+        "Max_Pages": p_max_pages
+    }
+    
+    if not os.path.exists(config.DATA_DIR):
+        os.makedirs(config.DATA_DIR)
+        
+    with open(stats_path, 'w') as f:
+        json.dump(stats, f, indent=2)
+    
+    print(f"Parameters saved to {stats_path}")
+    
     # ... (Rest of script execution) ...
     
     # 1. Scraper (Optional skip)
@@ -127,7 +155,9 @@ def main():
     scripts = [
         (os.path.join(root_dir, "financial_engine", "main.py"), "Module 2: Financial Engine (Sharpe Ranking)"),
         (os.path.join(root_dir, "portfolio_optimizer", "main.py"), "Module 3: Portfolio Optimization"),
+        (os.path.join(root_dir, "portfolio_optimizer", "main.py"), "Module 3: Portfolio Optimization"),
         (os.path.join(root_dir, "backtester", "main.py"), "Module 4: Backtester"),
+        (os.path.join(root_dir, "financial_engine", "top_10_analyzer.py"), "Top 10 Exclusion Analysis"),
         (os.path.join(root_dir, "report_generator", "create_report.py"), "Final Reporting")
     ]
     
@@ -141,7 +171,7 @@ def main():
             time_str = "{:0>2}:{:0>2}:{:05.2f}".format(int(hours), int(minutes), seconds)
             
             # Save to stats
-            stats_path = os.path.join(root_dir, "stock_agent", "scraping_stats.json")
+            stats_path = os.path.join(config.DATA_DIR, "scraping_stats.json")
             if os.path.exists(stats_path):
                 try:
                     with open(stats_path, 'r') as f:

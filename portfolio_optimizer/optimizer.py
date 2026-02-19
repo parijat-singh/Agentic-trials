@@ -97,10 +97,47 @@ def optimize_portfolio(prices_df, risk_free_rate):
     print(f"Expected Annual Return: {opt_return:.2%}")
     print(f"Expected Annual Volatility: {opt_volatility:.2%}")
     
+    # Calculate Detailed Asset Contributions
+    # 1. Contribution to Return
+    contrib_return = mean_daily_returns * optimal_weights * 252
+    
+    # 2. Risk Contribution
+    # MCR = (Sigma * w) / sigma_p
+    # RC = w * MCR
+    sigma_w = np.dot(cov_matrix, optimal_weights)
+    daily_vol = opt_volatility / np.sqrt(252)
+    
+    if daily_vol > 0:
+        mcr = sigma_w / daily_vol
+    else:
+        mcr = np.zeros_like(sigma_w)
+        
+    risk_contribution = optimal_weights * mcr
+    # Annualize risk contribution (kind of proportional, but let's keep it as % of total var or vol)
+    # Actually customary to sum to total vol. 
+    # Let's simple use: RC_annual = RC_daily * sqrt(252)
+    risk_contribution_ann = risk_contribution * np.sqrt(252)
+    
+    # 3. Correlation with Portfolio
+    # rho_i_p = cov(i, p) / (sigma_i * sigma_p)
+    # cov(i, p) is sigma_w[i]
+    asset_stds = np.sqrt(np.diag(cov_matrix))
+    correlations = []
+    
+    for i in range(len(optimal_weights)):
+        if asset_stds[i] > 0 and daily_vol > 0:
+             corr = sigma_w[i] / (asset_stds[i] * daily_vol)
+        else:
+             corr = 0
+        correlations.append(corr)
+    
     # Create Result DataFrame
     portfolio_df = pd.DataFrame({
         'Symbol': prices_df.columns,
-        'Weight': optimal_weights
+        'Weight': optimal_weights,
+        'Return Contrib': contrib_return,
+        'Risk Contrib': risk_contribution_ann,
+        'Correlation': correlations
     })
     
     # Filter out tiny weights

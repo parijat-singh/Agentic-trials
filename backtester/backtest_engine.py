@@ -31,7 +31,10 @@ def load_3y_data(data_dir):
     # We'll use a rough 756 trading days approximation or date offset
     three_years_ago = pd.Timestamp.now() - pd.DateOffset(years=3)
     
-    for file_path in csv_files:
+    import concurrent.futures
+
+    def process_file(file_path):
+        """Helper to process a single CSV file."""
         try:
             symbol = os.path.basename(file_path).replace(".csv", "")
             df = pd.read_csv(file_path, parse_dates=['Date'], index_col='Date')
@@ -45,13 +48,38 @@ def load_3y_data(data_dir):
             
             # Use data if it has at least 1 year of history
             if len(df) < 252:
-                continue
+                return None
                 
-            price_data[symbol] = df['Close']
+            # SANITY CHECK: Minimum price filter (exclude penny stock noise)
+            if df['Close'].min() < 0.05:
+                # print(f"Skipping {symbol}: Price dropped below $0.05 (too volatile).")
+                return None
+                
+            return (symbol, df['Close'])
             
         except Exception:
-            continue
+            return None
+
+    # Parallel Execution
+    print(f"Loading files in parallel with up to 20 threads...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        future_to_file = {executor.submit(process_file, fp): fp for fp in csv_files}
+        
+        completed = 0
+        total = len(csv_files)
+        
+        for future in concurrent.futures.as_completed(future_to_file):
+            res = future.result()
+            if res:
+                symbol, series = res
+                price_data[symbol] = series
             
+            completed += 1
+            if completed % 100 == 0:
+                 print(f"Loaded {completed}/{total} files...", end='\r', flush=True)
+
+    print(f"Loaded {len(price_data)} valid stocks. combining...")
+    
     # Combine
     prices_df = pd.DataFrame(price_data)
     
@@ -115,9 +143,17 @@ def filter_consecutive_growth(prices_df):
         print(f"Checking consistency for years: {last_3_years.index.strftime('%Y').tolist()}")
         
         for stock in prices_df.columns:
+            # Check last 3 periods for positive returns
             years_positive = (last_3_years[stock] > 0).all()
-            if years_positive:
+            
+            # SANITY CHECK: Check for extreme outliers (e.g. > 10,000% gain in a single year)
+            # This often indicates data corruption or reverse splits not handled by provider.
+            has_extreme_outlier = (last_3_years[stock] > 100.0).any() 
+            
+            if years_positive and not has_extreme_outlier:
                 consistent_stocks.append(stock)
+            elif has_extreme_outlier:
+                print(f"Rejecting {stock}: Extreme outlier return detected (>10,000% jump).")
 
     print(f"Found {len(consistent_stocks)} stocks with consecutive annual growth.")
     

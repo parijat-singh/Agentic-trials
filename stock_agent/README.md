@@ -5,6 +5,11 @@ An automated agent that:
 2.  **Filters** for the top 100 companies by market cap that have started trading within the last 10 years.
 3.  **Downloads** 10 years of historical data for these companies.
 
+### Database Management
+- `db_manager.py`: Handles SQLite operations.
+- `populate_db.py`: One-off script to import existing CSVs from `data/` into the database.
+- `market_cap_scraper.py`: Main data collector. Checks DB before downloading.
+
 ## Setup
 
 1.  **Install Dependencies**:
