@@ -13,3 +13,10 @@ fastapi
 uvicorn
 pydantic
 aiofiles
+
+# Dev / Test
+pytest
+pytest-cov
+pytest-asyncio
+httpx
+tabulate

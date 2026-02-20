@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["."]
+omit = ["venv/*", "tests/*", "*/test_*.py"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "def __repr__"]
