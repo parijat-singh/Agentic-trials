@@ -1,3 +1,4 @@
+# Production dependencies only (no pytest, etc.)
 pandas
 numpy
 yfinance
@@ -7,17 +8,8 @@ requests
 lxml
 html5lib
 tqdm
-pandas_datareader
 beautifulsoup4
 fastapi
 uvicorn
 pydantic
 aiofiles
-
-# Dev / Test
-pytest
-pytest-cov
-pytest-asyncio
-httpx
-tabulate
-pip-audit

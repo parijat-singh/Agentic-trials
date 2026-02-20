@@ -45,6 +45,11 @@ def main():
     parser.add_argument("--max-ipo", type=float, help="Maximum years since IPO")
     parser.add_argument("--max-pe", type=float, help="Maximum P/E Ratio")
     parser.add_argument("--min-market-cap", type=float, help="Minimum Market Cap in Billions")
+    parser.add_argument("--min-price", type=float, help="Minimum current stock price ($)")
+    parser.add_argument("--max-price", type=float, help="Maximum current stock price ($)")
+    parser.add_argument("--no-exchange-filter", action="store_true", help="Disable NYSE/NASDAQ-only filter")
+    parser.add_argument("--industries", type=str, default=None,
+                        help="Comma-separated sectors to include (e.g. Technology,Healthcare)")
     parser.add_argument("--max-pages", type=int, default=200, help="Max pages to scan")
     parser.add_argument("--skip-scraper", action="store_true", help="Skip the scraping step")
     
@@ -103,6 +108,9 @@ def main():
                 stats = json.load(f)
         except: pass
     
+    industries_list = [s.strip() for s in (args.industries or "").split(",") if s and s.strip()] or None
+    if industries_list:
+        print(f"Industry filter active: {industries_list}", flush=True)
     # Update only the parameters section
     stats["Parameters"] = {
         "Min_History": p_min_hist,
@@ -110,6 +118,10 @@ def main():
         "Max_IPO": p_max_ipo,
         "Max_PE": p_max_pe,
         "Min_Market_Cap": args.min_market_cap,
+        "Min_Price": args.min_price,
+        "Max_Price": args.max_price,
+        "NYSE_NASDAQ_Only": not args.no_exchange_filter,
+        "Industries": industries_list,
         "Max_Pages": p_max_pages
     }
     
@@ -145,11 +157,34 @@ def main():
             scraper_args.append(f"--max-pe={p_max_pe}")
 
         if args.min_market_cap is not None:
-             scraper_args.append(f"--min-market-cap={args.min_market_cap}")
-            
+            scraper_args.append(f"--min-market-cap={args.min_market_cap}")
+        if args.min_price is not None:
+            scraper_args.append(f"--min-price={args.min_price}")
+        if args.max_price is not None:
+            scraper_args.append(f"--max-price={args.max_price}")
+        if args.no_exchange_filter:
+            scraper_args.append("--no-exchange-filter")
+        if args.industries:
+            scraper_args.append(f"--industries={args.industries}")
+
         if not run_script(scraper_script, "Module 1: Stock Scraper", args=scraper_args):
              print("Pipeline interrupted at Scraper.")
              sys.exit(1)
+
+    # 1.5 Industry filter on top_100_new_stocks.csv (critical when skip_scraper: reuses old CSV)
+    if industries_list:
+        import pandas as pd
+        csv_path = os.path.join(config.DATA_DIR, "top_100_new_stocks.csv")
+        if os.path.exists(csv_path):
+            df = pd.read_csv(csv_path)
+            sector_col = 'sector' if 'sector' in df.columns else ('Sector' if 'Sector' in df.columns else None)
+            if sector_col:
+                before = len(df)
+                df = df[df[sector_col].notna() & df[sector_col].isin(industries_list)]
+                df.to_csv(csv_path, index=False)
+                print(f"Industry filter: {before} -> {len(df)} stocks (sectors: {', '.join(industries_list)})")
+            else:
+                print("Warning: top_100_new_stocks.csv has no sector column; cannot filter by industry.")
 
     # 2. Other Modules
     scripts = [
@@ -170,17 +205,25 @@ def main():
             minutes, seconds = divmod(rem, 60)
             time_str = "{:0>2}:{:0>2}:{:05.2f}".format(int(hours), int(minutes), seconds)
             
-            # Save to stats
+            # Save to stats (re-apply Parameters so report shows correct filter values)
             stats_path = os.path.join(config.DATA_DIR, "scraping_stats.json")
-            if os.path.exists(stats_path):
-                try:
+            try:
+                stats = {}
+                if os.path.exists(stats_path):
                     with open(stats_path, 'r') as f:
-                         stats = json.load(f)
-                    stats["Total_Time"] = time_str
-                    with open(stats_path, 'w') as f:
-                        json.dump(stats, f, indent=2)
-                except Exception as e:
-                    print(f"Error saving time stats: {e}")
+                        stats = json.load(f)
+                stats["Total_Time"] = time_str
+                stats["Parameters"] = {
+                    "Min_History": p_min_hist, "Min_IPO": p_min_ipo, "Max_IPO": p_max_ipo,
+                    "Max_PE": p_max_pe, "Min_Market_Cap": args.min_market_cap,
+                    "Min_Price": args.min_price, "Max_Price": args.max_price,
+                    "NYSE_NASDAQ_Only": not args.no_exchange_filter,
+                    "Industries": industries_list, "Max_Pages": p_max_pages
+                }
+                with open(stats_path, 'w') as f:
+                    json.dump(stats, f, indent=2)
+            except Exception as e:
+                print(f"Error saving time stats: {e}")
         
         if "create_report.py" in script_path:
              if not run_script(script_path, desc, args=[run_description]):

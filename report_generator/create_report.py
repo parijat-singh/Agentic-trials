@@ -68,6 +68,13 @@ def get_waterfall_section():
     md += "|:---|:---|---:|\n"
     md += f"| **1. Scanned** | Total stocks checked (Market Cap Descending) | {count_scanned} |\n"
     md += f"| *Filter: Non-US* | Excluded non-USD stocks | -{count_non_us} |\n"
+    if params.get("NYSE_NASDAQ_Only", True):
+        count_skipped_ex = stats.get("Skipped_Exchange", 0)
+        md += f"| *Filter: Exchange* | Non-NYSE/NASDAQ | -{count_skipped_ex} |\n"
+    inds = params.get("Industries")
+    if inds:
+        count_skipped_ind = stats.get("Skipped_Industry", 0)
+        md += f"| *Filter: Sector* | Not in {', '.join(inds)} | -{count_skipped_ind} |\n"
     md += f"| *Filter: Too Old* | IPO > {p_max_ipo} Years ago | -{count_too_old} |\n"
     md += f"| *Filter: Too New* | History < {p_min_hist} Years or IPO < {p_min_ipo} Years | -{count_too_new} |\n"
     
@@ -81,6 +88,12 @@ def get_waterfall_section():
     if p_min_cap:
         count_skipped_cap = stats.get("Skipped_Market_Cap", 0)
         md += f"| *Filter: Market Cap* | Cap < ${p_min_cap}B | -{count_skipped_cap} |\n"
+    p_min_pr = params.get("Min_Price")
+    p_max_pr = params.get("Max_Price")
+    if p_min_pr is not None or p_max_pr is not None:
+        count_skipped_pr = stats.get("Skipped_Price", 0)
+        pr_desc = f"${p_min_pr}-${p_max_pr}" if (p_min_pr and p_max_pr) else (f"< ${p_min_pr}" if p_min_pr else f"> ${p_max_pr}")
+        md += f"| *Filter: Price* | Outside {pr_desc} | -{count_skipped_pr} |\n"
          
     md += f"| *Filter: Errors* | Data fetch errors | -{count_errors} |\n"
     md += f"| **2. Candidates** | Passed all criteria | **{count_selected}** |\n"
@@ -399,6 +412,15 @@ def generate_markdown(criteria_description="Default Run"):
     if p_min_cap is None: p_min_cap = "Disabled"
     else: p_min_cap = f"${p_min_cap}B"
 
+    p_min_price = params.get("Min_Price", "Disabled")
+    p_max_price = params.get("Max_Price", "Disabled")
+    if p_min_price is None: p_min_price = "Disabled"
+    if p_max_price is None: p_max_price = "Disabled"
+    p_exch = "Yes" if params.get("NYSE_NASDAQ_Only", True) else "No"
+    p_industries = params.get("Industries")
+    if p_industries is not None and not isinstance(p_industries, list):
+        p_industries = [s.strip() for s in str(p_industries).split(",") if s.strip()] if p_industries else None
+    p_industries_str = ", ".join(p_industries) if p_industries else "All"
     report_content += "### Run Configuration\n"
     report_content += "| Parameter | Value |\n"
     report_content += "|:---|:---|\n"
@@ -406,7 +428,11 @@ def generate_markdown(criteria_description="Default Run"):
     report_content += f"| **Min IPO Age** | {p_min_ipo} Years |\n"
     report_content += f"| **Max IPO Age** | {p_max_ipo} Years |\n"
     report_content += f"| **Max P/E Ratio** | {p_max_pe} |\n"
-    report_content += f"| **Min Market Cap** | {p_min_cap} |\n\n"
+    report_content += f"| **Min Market Cap** | {p_min_cap} |\n"
+    report_content += f"| **Min Price** | {p_min_price} |\n"
+    report_content += f"| **Max Price** | {p_max_price} |\n"
+    report_content += f"| **NYSE/NASDAQ Only** | {p_exch} |\n"
+    report_content += f"| **Sectors** | {p_industries_str} |\n\n"
     
     report_content += "---\n\n"
     

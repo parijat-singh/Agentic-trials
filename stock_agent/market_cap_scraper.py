@@ -84,6 +84,62 @@ def is_likely_us_stock(symbol):
         return False
     return True
 
+# NYSE/NASDAQ exchange identifiers from Yahoo Finance
+NYSE_NASDAQ_EXCHANGES = frozenset({
+    'NYQ', 'NMS', 'NASDAQ', 'NasdaqGS', 'NCM', 'NGM', 'New York Stock Exchange',
+    'NASDAQ Global Select', 'NASDAQ Capital Market', 'NASDAQ Global Market'
+})
+
+def is_nyse_or_nasdaq(exchange):
+    """Return True if exchange is NYSE or NASDAQ."""
+    if not exchange:
+        return False
+    ex = str(exchange).strip().upper()
+    return ex in {e.upper() for e in NYSE_NASDAQ_EXCHANGES}
+
+def get_current_price(symbol):
+    """Fetches current price for a symbol. Returns float or None."""
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        price = info.get('regularMarketPrice') or info.get('currentPrice') or info.get('previousClose')
+        return float(price) if price is not None else None
+    except Exception:
+        return None
+
+def get_exchange_cached(symbol, db):
+    """
+    Get exchange for a symbol. Checks DB first; if missing, fetches from yfinance and saves to DB.
+    Returns exchange string (e.g. 'NMS', 'NYQ') or None.
+    """
+    ex = db.get_exchange(symbol)
+    if ex is not None:
+        return ex
+    ex, _ = get_metadata_cached(symbol, db)
+    return ex
+
+def get_metadata_cached(symbol, db):
+    """
+    Get (exchange, sector) for a symbol. Checks DB first; if either missing, fetches from yfinance
+    and saves both. Returns (exchange, sector) - either may be None.
+    """
+    ex = db.get_exchange(symbol)
+    sec = db.get_sector(symbol)
+    if ex is not None and sec is not None:
+        return (ex, sec)
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        ex_new = ex or (info.get('exchange') or info.get('exchangeName'))
+        sec_new = sec or info.get('sector')
+        if ex_new:
+            db.save_exchange(symbol, ex_new)
+        if sec_new:
+            db.save_sector(symbol, sec_new)
+        return (ex_new, sec_new)
+    except Exception:
+        return (ex, sec)
+
 def get_pe_ratio(symbol):
     """
     Fetches P/E ratio for a single symbol.
@@ -124,7 +180,8 @@ def parse_market_cap(mcap_str):
     except:
         return None
 
-def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_market_cap=None):
+def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_market_cap=None,
+                  min_price=None, max_price=None, nyse_nasdaq_only=True, industries=None):
     """
     Takes a list of company dicts.
     Filters by Market Cap (Pre-fetch), Date and P/E (Post-fetch).
@@ -270,6 +327,9 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
         "Too_New": 0, 
         "Skipped_PE": 0,
         "Skipped_Market_Cap": skipped_mcap,
+        "Skipped_Exchange": 0,
+        "Skipped_Price": 0,
+        "Skipped_Industry": 0,
         "Errors": 0,
         "Selected": 0
     }
@@ -285,6 +345,18 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
             continue
             
         try:
+            # Cache exchange and sector in DB for future lookups (avoids API calls on next run)
+            c['exchange'], c['sector'] = get_metadata_cached(sym, db)
+            # Exchange filter: NYSE/NASDAQ only
+            if nyse_nasdaq_only and not is_nyse_or_nasdaq(c['exchange']):
+                stats["Skipped_Exchange"] += 1
+                continue
+            # Industry filter: only include selected sectors
+            if industries and len(industries) > 0:
+                sector = (c.get('sector') or '').strip()
+                if sector not in [s.strip() for s in industries]:
+                    stats["Skipped_Industry"] += 1
+                    continue
             start_date = df.index[0]
             if start_date.tzinfo:
                 start_date = start_date.tz_localize(None)
@@ -308,6 +380,19 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
                 if pe is None or pe > max_pe or pe < 0:
                     stats["Skipped_PE"] += 1
                     continue
+            # Current price filter
+            if min_price is not None or max_price is not None:
+                price = get_current_price(sym)
+                if price is not None:
+                    if min_price is not None and price < min_price:
+                        stats["Skipped_Price"] += 1
+                        continue
+                    if max_price is not None and price > max_price:
+                        stats["Skipped_Price"] += 1
+                        continue
+                elif min_price is not None or max_price is not None:
+                    stats["Skipped_Price"] += 1
+                    continue
             
             # Accepted
             c['start_date'] = str(start_date.date())
@@ -322,7 +407,8 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
             df.to_csv(f"{DATA_DIR}/{sym}.csv")
             
             pe_str = f" P/E: {pe:.2f}" if max_pe is not None else ""
-            print(f"[MATCH] {sym}: Started {start_date.date()} (Cap: {c['market_cap']}){pe_str}", flush=True)
+            ex_str = f" [{c.get('exchange', '')}]" if c.get('exchange') else ""
+            print(f"[MATCH] {sym}: Started {start_date.date()} (Cap: {c['market_cap']}){pe_str}{ex_str}", flush=True)
 
         except Exception as e:
             print(f"Error processing {sym}: {e}")
@@ -337,11 +423,19 @@ def main():
     parser.add_argument("--max-ipo", type=float, default=10, help="Maximum years since IPO")
     parser.add_argument("--max-pe", type=float, default=None, help="Maximum P/E Ratio (None to disable)")
     parser.add_argument("--min-market-cap", type=float, default=None, help="Minimum Market Cap in Billions")
+    parser.add_argument("--min-price", type=float, default=None, help="Minimum current stock price ($)")
+    parser.add_argument("--max-price", type=float, default=None, help="Maximum current stock price ($)")
+    parser.add_argument("--no-exchange-filter", action="store_true", help="Disable NYSE/NASDAQ-only filter")
+    parser.add_argument("--industries", type=str, default=None,
+                        help="Comma-separated sectors to include (e.g. Technology,Healthcare). Empty=all.")
     parser.add_argument("--max-pages", type=int, default=200, help="Max pages to scan")
     
     args = parser.parse_args()
-    
-    print(f"=== Stock Data Agent: Scan (IPO {args.min_ipo}-{args.max_ipo}y, Hist {args.min_history}y, P/E < {args.max_pe}, Cap > {args.min_market_cap}B) ===")
+    nyse_nasdaq_only = not args.no_exchange_filter
+    industries = [s.strip() for s in (args.industries or "").split(",") if s.strip()] or None
+
+    price_range = f"${args.min_price or 0}-{args.max_price or '∞'}" if (args.min_price or args.max_price) else "Any"
+    print(f"=== Stock Data Agent: Scan (IPO {args.min_ipo}-{args.max_ipo}y, Hist {args.min_history}y, P/E < {args.max_pe}, Cap > {args.min_market_cap}B, Price {price_range}, NYSE/NASDAQ: {nyse_nasdaq_only}) ===")
     
     collected_stocks = []
     
@@ -352,6 +446,9 @@ def main():
         "Too_New": 0,
         "Skipped_PE": 0,
         "Skipped_Market_Cap": 0,
+        "Skipped_Exchange": 0,
+        "Skipped_Price": 0,
+        "Skipped_Industry": 0,
         "Errors": 0,
         "Selected": 0
     }
@@ -369,7 +466,11 @@ def main():
             
         print(f"Found {len(companies)} companies. Checking filters...", flush=True)
         
-        accepted_batch, batch_stats, stop_scan = process_batch(companies, args.min_history, args.min_ipo, args.max_ipo, args.max_pe, args.min_market_cap)
+        accepted_batch, batch_stats, stop_scan = process_batch(
+            companies, args.min_history, args.min_ipo, args.max_ipo, args.max_pe,
+            min_market_cap=args.min_market_cap, min_price=args.min_price, max_price=args.max_price,
+            nyse_nasdaq_only=nyse_nasdaq_only, industries=industries
+        )
         
         for k, v in batch_stats.items():
             if k in total_stats:
@@ -400,7 +501,11 @@ def main():
         "Min_IPO": args.min_ipo,
         "Max_IPO": args.max_ipo,
         "Max_PE": args.max_pe,
-        "Min_Market_Cap": args.min_market_cap
+        "Min_Market_Cap": args.min_market_cap,
+        "Min_Price": args.min_price,
+        "Max_Price": args.max_price,
+        "NYSE_NASDAQ_Only": nyse_nasdaq_only,
+        "Industries": industries
     }
     
     print(f"DEBUG: Saving stats with parameters: {total_stats['Parameters']}")

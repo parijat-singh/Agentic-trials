@@ -102,6 +102,22 @@
             ring: 2px solid rgba(59, 130, 246, 0.5);
         }
 
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .checkbox-grid .checkbox-group {
+            margin-bottom: 0;
+        }
+
+        .checkbox-grid label {
+            margin-bottom: 0;
+            cursor: pointer;
+        }
+
         .checkbox-group {
             display: flex;
             align-items: center;
@@ -279,10 +295,42 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="min_price">Min Current Price ($) (Optional)</label>
+                        <input type="number" id="min_price" placeholder="e.g. 10" step="0.01" min="0">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="max_price">Max Current Price ($) (Optional)</label>
+                        <input type="number" id="max_price" placeholder="e.g. 500" step="0.01" min="0">
+                    </div>
+
+                    <div class="form-group">
                         <label for="max_pages">Max Search Pages</label>
                         <input type="number" id="max_pages" value="200" step="1" min="1">
                         <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">200 pages ≈
                             20,000 stocks</div>
+                    </div>
+
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="nyse_nasdaq_only" checked>
+                        <label for="nyse_nasdaq_only" style="margin-bottom: 0; cursor: pointer;">NYSE/NASDAQ Only</label>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Sectors (select to filter — leave all unchecked for all)</label>
+                        <div class="checkbox-grid">
+                            <div class="checkbox-group"><input type="checkbox" id="sector_technology" value="Technology"><label for="sector_technology">Technology</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_financial" value="Financial Services"><label for="sector_financial">Financial Services</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_healthcare" value="Healthcare"><label for="sector_healthcare">Healthcare</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_consumer_cyclical" value="Consumer Cyclical"><label for="sector_consumer_cyclical">Consumer Cyclical</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_consumer_defensive" value="Consumer Defensive"><label for="sector_consumer_defensive">Consumer Defensive</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_industrials" value="Industrials"><label for="sector_industrials">Industrials</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_energy" value="Energy"><label for="sector_energy">Energy</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_utilities" value="Utilities"><label for="sector_utilities">Utilities</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_real_estate" value="Real Estate"><label for="sector_real_estate">Real Estate</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_basic_materials" value="Basic Materials"><label for="sector_basic_materials">Basic Materials</label></div>
+                            <div class="checkbox-group"><input type="checkbox" id="sector_communication" value="Communication Services"><label for="sector_communication">Communication Services</label></div>
+                        </div>
                     </div>
 
                     <div class="form-group checkbox-group">
@@ -369,16 +417,27 @@
             resultsArea.innerText = "Initializing pipeline...\n";
             isStopping = false;
 
-            // Collect Params
+            // Collect Params - use valueAsNumber for numeric inputs to avoid string/empty edge cases
             const maxPeVal = document.getElementById('max_pe').value;
             const minMarketCapVal = document.getElementById('min_market_cap').value;
+            const minPriceEl = document.getElementById('min_price');
+            const maxPriceEl = document.getElementById('max_price');
+            const minPriceNum = minPriceEl.value !== '' ? parseFloat(minPriceEl.value) : NaN;
+            const maxPriceNum = maxPriceEl.value !== '' ? parseFloat(maxPriceEl.value) : NaN;
 
+            const industriesChecked = Array.from(document.querySelectorAll('input[id^="sector_"]'))
+                .filter(cb => cb.checked)
+                .map(cb => cb.value || cb.getAttribute('value'));
             const payload = {
                 min_history: parseFloat(document.getElementById('min_history').value),
                 min_ipo: parseFloat(document.getElementById('min_ipo').value),
                 max_ipo: parseFloat(document.getElementById('max_ipo').value),
                 min_market_cap: minMarketCapVal ? parseFloat(minMarketCapVal) : null,
                 max_pe: maxPeVal ? parseFloat(maxPeVal) : null,
+                min_price: (!isNaN(minPriceNum) && minPriceNum >= 0) ? minPriceNum : null,
+                max_price: (!isNaN(maxPriceNum) && maxPriceNum >= 0) ? maxPriceNum : null,
+                no_exchange_filter: !document.getElementById('nyse_nasdaq_only').checked,
+                industries: industriesChecked.length > 0 ? industriesChecked : null,
                 max_pages: parseInt(document.getElementById('max_pages').value),
                 skip_scraper: document.getElementById('skip_scraper').checked
             };

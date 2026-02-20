@@ -56,18 +56,21 @@ def rank_stocks(data_dir, risk_free_rate):
     """
     results = []
     
-    # Load Max_PE and Min_History if available
+    # Load Max_PE, Min_History, Industries from stats if available
     max_pe = None
     min_history = None
+    industries_filter = None
     stats_file = os.path.join(data_dir, "scraping_stats.json")
     if os.path.exists(stats_file):
         try:
             import json
             with open(stats_file, 'r') as f:
-                stats = json.load(f)
-                params = stats.get("Parameters", {})
+                params = json.load(f).get("Parameters", {})
                 max_pe = params.get("Max_PE")
                 min_history = params.get("Min_History")
+                industries_filter = params.get("Industries")
+                if industries_filter is not None and not isinstance(industries_filter, list):
+                    industries_filter = [s.strip() for s in str(industries_filter).split(",") if s.strip()] or None
                 print(f"DEBUG: sharpe_ranker loaded Max_PE: {max_pe}, Min_History: {min_history}")
         except Exception as e: 
             print(f"DEBUG: sharpe_ranker failed to load stats: {e}")
@@ -77,9 +80,16 @@ def rank_stocks(data_dir, risk_free_rate):
     meta_file = os.path.join(data_dir, "top_100_new_stocks.csv")
     symbols = []
     symbol_pe_map = {}
-    
+
     if os.path.exists(meta_file):
         meta_df = pd.read_csv(meta_file)
+        # Filter by industry/sector if specified in Parameters
+        sector_col = 'sector' if 'sector' in meta_df.columns else ('Sector' if 'Sector' in meta_df.columns else None)
+        if industries_filter and sector_col and sector_col in meta_df.columns:
+            before = len(meta_df)
+            meta_df = meta_df[meta_df[sector_col].notna() & meta_df[sector_col].isin(industries_filter)]
+            if len(meta_df) < before:
+                print(f"Industry filter (sharpe_ranker): {before} -> {len(meta_df)} stocks")
         # Handle Symbol case and map PE
         sym_col = 'symbol' if 'symbol' in meta_df.columns else 'Symbol'
         if sym_col in meta_df.columns:

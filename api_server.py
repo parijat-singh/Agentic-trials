@@ -32,6 +32,10 @@ class AnalyzeRequest(BaseModel):
     max_ipo: float = 10.0
     min_market_cap: Optional[float] = None
     max_pe: Optional[float] = None
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    no_exchange_filter: bool = False
+    industries: Optional[List[str]] = None
     max_pages: int = 200
     skip_scraper: bool = False
 
@@ -130,7 +134,18 @@ def run_analysis(request: AnalyzeRequest):
 
     if request.min_market_cap is not None:
         cmd.append(f"--min-market-cap={request.min_market_cap}")
-        
+    if request.min_price is not None:
+        cmd.append(f"--min-price={request.min_price}")
+    if request.max_price is not None:
+        cmd.append(f"--max-price={request.max_price}")
+    if request.no_exchange_filter:
+        cmd.append("--no-exchange-filter")
+    industries = request.industries if request.industries is not None else []
+    if isinstance(industries, list) and len(industries) > 0:
+        industries_str = ",".join(str(s).strip() for s in industries if s)
+        if industries_str:
+            cmd.append(f"--industries={industries_str}")
+
     if request.skip_scraper:
         cmd.append("--skip-scraper")
         
@@ -190,5 +205,5 @@ def stop_process():
 
 if __name__ == "__main__":
     import uvicorn
-    # Run slightly different port to avoid conflicts
-    uvicorn.run(app, host="0.0.0.0", port=8081)
+    port = int(os.environ.get("PORT", 8081))
+    uvicorn.run(app, host="0.0.0.0", port=port)

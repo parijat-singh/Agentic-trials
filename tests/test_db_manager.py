@@ -48,3 +48,13 @@ def test_db_manager_empty_df_no_error(temp_db):
     db.save_history("EMPTY", pd.DataFrame())
     latest = db.get_latest_date("EMPTY")
     assert latest is None
+
+
+def test_db_manager_exchange_save_and_get(temp_db):
+    from stock_agent.db_manager import DBManager
+    db = DBManager(db_path=temp_db)
+    assert db.get_exchange("AAPL") is None
+    db.save_exchange("AAPL", "NMS")
+    assert db.get_exchange("AAPL") == "NMS"
+    db.save_exchange("AAPL", "NASDAQ")  # update
+    assert db.get_exchange("AAPL") == "NASDAQ"

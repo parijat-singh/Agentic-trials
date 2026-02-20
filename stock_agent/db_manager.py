@@ -22,7 +22,6 @@ class DBManager:
         cursor = conn.cursor()
         
         # Create stock_history table
-        # We use a composite primary key (Symbol, Date) to prevent duplicates
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS stock_history (
             Date TEXT,
@@ -35,9 +34,78 @@ class DBManager:
             PRIMARY KEY (Symbol, Date)
         )
         ''')
-        
+        # Create stock_metadata table for symbol-level data (exchange, sector, etc.) - avoids API lookups each run
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS stock_metadata (
+            Symbol TEXT PRIMARY KEY,
+            Exchange TEXT,
+            Sector TEXT,
+            UpdatedAt TEXT
+        )
+        ''')
         conn.commit()
+
+        # Migration: add Sector column if missing (existing DBs)
+        try:
+            cursor.execute("SELECT Sector FROM stock_metadata LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE stock_metadata ADD COLUMN Sector TEXT")
+            conn.commit()
         conn.close()
+
+    def get_exchange(self, symbol):
+        """Get stored exchange for a symbol. Returns None if not in DB."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT Exchange FROM stock_metadata WHERE Symbol = ?', (symbol,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row and row[0] else None
+
+    def save_exchange(self, symbol, exchange):
+        """Store or update exchange for a symbol."""
+        if not exchange:
+            return
+        conn = sqlite3.connect(self.db_path)
+        try:
+            updated = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            conn.execute('''
+                INSERT INTO stock_metadata (Symbol, Exchange, UpdatedAt)
+                VALUES (?, ?, ?)
+                ON CONFLICT(Symbol) DO UPDATE SET Exchange = ?, UpdatedAt = ?
+            ''', (symbol, str(exchange), updated, str(exchange), updated))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_sector(self, symbol):
+        """Get stored sector for a symbol. Returns None if not in DB."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT Sector FROM stock_metadata WHERE Symbol = ?', (symbol,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row and row[0] else None
+
+    def save_sector(self, symbol, sector):
+        """Store or update sector for a symbol."""
+        if not sector:
+            return
+        conn = sqlite3.connect(self.db_path)
+        try:
+            updated = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1 FROM stock_metadata WHERE Symbol = ?', (symbol,))
+            exists = cursor.fetchone()
+            if exists:
+                cursor.execute('UPDATE stock_metadata SET Sector = ?, UpdatedAt = ? WHERE Symbol = ?',
+                               (str(sector), updated, symbol))
+            else:
+                cursor.execute('INSERT INTO stock_metadata (Symbol, Sector, UpdatedAt) VALUES (?, ?, ?)',
+                               (symbol, str(sector), updated))
+            conn.commit()
+        finally:
+            conn.close()
 
     def get_latest_date(self, symbol):
         """Get the latest date available for a given symbol."""

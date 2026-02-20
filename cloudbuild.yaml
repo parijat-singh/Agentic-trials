@@ -1,0 +1,43 @@
+# Google Cloud Build - builds and deploys to Cloud Run
+# Usage: gcloud builds submit --config=cloudbuild.yaml
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/stock-analysis-api:latest'
+      - '.'
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/stock-analysis-api:latest'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'stock-analysis-api'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/stock-analysis-api:latest'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '2'
+      - '--timeout'
+      - '3600'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '3'
+
+images:
+  - 'gcr.io/$PROJECT_ID/stock-analysis-api:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
