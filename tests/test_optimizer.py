@@ -23,7 +23,9 @@ class TestLoadData:
         for sym in ["AAPL", "MSFT", "GOOG"]:
             df = sample_multi_stock_prices[[sym]].copy()
             df.columns = ["Close"]
-            df.to_csv(os.path.join(data_dir, f"{sym}.csv"))
+            df = df.reset_index()
+            df.columns = ["Date", "Close"]
+            df.to_csv(os.path.join(data_dir, f"{sym}.csv"), index=False)
         result = load_data(top_50_path, data_dir)
         assert not result.empty
 

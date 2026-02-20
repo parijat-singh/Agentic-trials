@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 
 import pytest
+import numpy as np
 import pandas as pd
 
 # Add project root to path
@@ -37,13 +38,16 @@ def sample_prices_df():
 
 @pytest.fixture
 def sample_multi_stock_prices():
-    """Multi-stock price DataFrame."""
+    """Multi-stock price DataFrame. Need 5+ stocks for optimizer (max 20% each, sum=1)."""
     dates = pd.date_range(start="2020-01-01", periods=300, freq="B")
     n = len(dates)
+    t = np.arange(n, dtype=float)
     return pd.DataFrame({
-        "AAPL": [150 * (1.0005) ** i for i in range(n)],
-        "MSFT": [280 * (1.0004) ** i for i in range(n)],
-        "GOOG": [140 * (1.0006) ** i for i in range(n)],
+        "AAPL": 100 + t * 0.1 + np.sin(t / 20) * 2,
+        "MSFT": 105 + t * 0.12 + np.cos(t / 15) * 1.5,
+        "GOOG": 95 + t * 0.08 + np.sin(t / 25) * 2.5,
+        "AMZN": 110 + t * 0.09 + np.sin(t / 18) * 1.8,
+        "META": 90 + t * 0.11 + np.cos(t / 22) * 2.2,
     }, index=dates)
 
 

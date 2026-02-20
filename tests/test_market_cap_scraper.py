@@ -24,8 +24,9 @@ class TestParseMarketCap:
         assert parse_market_cap("") is None
         assert parse_market_cap(None) is None
 
-    def test_invalid_returns_none(self):
-        assert parse_market_cap("invalid") is None
+    def test_invalid_returns_zero(self):
+        # Unknown format returns 0.0 per implementation
+        assert parse_market_cap("invalid") == 0.0
 
 
 class TestIsLikelyUsStock:

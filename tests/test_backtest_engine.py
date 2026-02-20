@@ -45,8 +45,20 @@ class TestFilterConsecutiveGrowth:
 
 
 class TestOptimizeTotalReturn:
-    def test_optimize_returns_weights(self, sample_multi_stock_prices):
-        weights, max_ret = optimize_total_return(sample_multi_stock_prices)
+    def test_optimize_returns_weights(self):
+        # Needs 5+ stocks: backtester uses max 20% per stock, sum must equal 1
+        dates = pd.date_range(start="2020-01-01", periods=300, freq="B")
+        n = len(dates)
+        prices = pd.DataFrame({
+            "A": 100 * (1.001) ** np.arange(n),
+            "B": 101 * (1.002) ** np.arange(n),
+            "C": 102 * (1.0008) ** np.arange(n),
+            "D": 103 * (1.0012) ** np.arange(n),
+            "E": 104 * (1.0009) ** np.arange(n),
+        }, index=dates)
+        result = optimize_total_return(prices)
+        assert result is not None, "optimize_total_return failed (check constraints)"
+        weights, max_ret = result
         assert weights is not None
         assert max_ret is not None
         np.testing.assert_almost_equal(sum(weights), 1.0)
