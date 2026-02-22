@@ -3,6 +3,9 @@ import subprocess
 import sys
 import argparse
 import shutil
+import time
+import json
+import datetime
 import config
 
 def run_script(path, description, args=None):
@@ -16,7 +19,7 @@ def run_script(path, description, args=None):
         
     try:
         # Run the script and stream output
-        cmd = [sys.executable, path]
+        cmd = [sys.executable, "-u", path]  # -u: unbuffered for real-time streaming
         if args:
             cmd.extend(args)
             
@@ -178,9 +181,22 @@ def main():
         if os.path.exists(csv_path):
             df = pd.read_csv(csv_path)
             sector_col = 'sector' if 'sector' in df.columns else ('Sector' if 'Sector' in df.columns else None)
-            if sector_col:
+            # Enrich sector from DB if column missing
+            if sector_col is None or (sector_col in df.columns and df[sector_col].isna().all()):
+                try:
+                    from stock_agent.db_manager import DBManager
+                    sym_col = 'symbol' if 'symbol' in df.columns else 'Symbol'
+                    if sym_col in df.columns:
+                        db = DBManager()
+                        sector_col = 'sector'
+                        df[sector_col] = df[sym_col].map(lambda s: db.get_sector(s) if isinstance(s, str) else None)
+                except Exception as e:
+                    sector_col = None
+                    print(f"Warning: Could not enrich sector from DB: {e}")
+            if sector_col and sector_col in df.columns:
                 before = len(df)
-                df = df[df[sector_col].notna() & df[sector_col].isin(industries_list)]
+                inds_lower = [s.strip().lower() for s in industries_list]
+                df = df[df[sector_col].notna() & df[sector_col].apply(lambda s: str(s).strip().lower() in inds_lower if pd.notna(s) else False)]
                 df.to_csv(csv_path, index=False)
                 print(f"Industry filter: {before} -> {len(df)} stocks (sectors: {', '.join(industries_list)})")
             else:
@@ -204,6 +220,8 @@ def main():
             hours, rem = divmod(elapsed_time, 3600)
             minutes, seconds = divmod(rem, 60)
             time_str = "{:0>2}:{:0>2}:{:05.2f}".format(int(hours), int(minutes), seconds)
+            start_dt = datetime.datetime.fromtimestamp(start_time)
+            end_dt = datetime.datetime.fromtimestamp(end_time)
             
             # Save to stats (re-apply Parameters so report shows correct filter values)
             stats_path = os.path.join(config.DATA_DIR, "scraping_stats.json")
@@ -212,6 +230,8 @@ def main():
                 if os.path.exists(stats_path):
                     with open(stats_path, 'r') as f:
                         stats = json.load(f)
+                stats["Run_Start_Time"] = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+                stats["Run_End_Time"] = end_dt.strftime('%Y-%m-%d %H:%M:%S')
                 stats["Total_Time"] = time_str
                 stats["Parameters"] = {
                     "Min_History": p_min_hist, "Min_IPO": p_min_ipo, "Max_IPO": p_max_ipo,
@@ -226,7 +246,10 @@ def main():
                 print(f"Error saving time stats: {e}")
         
         if "create_report.py" in script_path:
-             if not run_script(script_path, desc, args=[run_description]):
+            report_args = [run_description]
+            if industries_list:
+                report_args.append(f"--industries={','.join(industries_list)}")
+            if not run_script(script_path, desc, args=report_args):
                 print("Pipeline interrupted.")
                 sys.exit(1)
         else:

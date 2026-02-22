@@ -24,7 +24,8 @@ LOG_FILE = os.path.join(ROOT_DIR, "REPORT_LOG.md")
 
 import json
 
-def get_waterfall_section():
+def get_waterfall_section(industries_override=None):
+    """industries_override: list of sector names from --industries CLI (overrides stats when set)"""
     stats = {}
     if os.path.exists(FILE_STATS):
         try:
@@ -71,7 +72,9 @@ def get_waterfall_section():
     if params.get("NYSE_NASDAQ_Only", True):
         count_skipped_ex = stats.get("Skipped_Exchange", 0)
         md += f"| *Filter: Exchange* | Non-NYSE/NASDAQ | -{count_skipped_ex} |\n"
-    inds = params.get("Industries")
+    inds = industries_override if industries_override is not None else params.get("Industries")
+    if inds is not None and not isinstance(inds, list):
+        inds = [s.strip() for s in str(inds).split(",") if s.strip()] or None
     if inds:
         count_skipped_ind = stats.get("Skipped_Industry", 0)
         md += f"| *Filter: Sector* | Not in {', '.join(inds)} | -{count_skipped_ind} |\n"
@@ -105,6 +108,15 @@ def get_waterfall_section():
     return md
 
 # --- Helper Functions for Yearly Analysis ---
+def _fmt_weight(x):
+    """Format weight for display; handles NaN and numeric types."""
+    if pd.isna(x):
+        return "N/A"
+    try:
+        return f"{float(x):.2%}"
+    except (TypeError, ValueError):
+        return str(x)
+
 def load_portfolio(file_path):
     if not os.path.exists(file_path):
         return None
@@ -171,18 +183,24 @@ def calculate_metrics(portfolio_weights, price_data, benchmark_symbol='SPY'):
     if not portfolio_weights or price_data.empty: return {}
 
     symbols = list(portfolio_weights.keys())
+    # Only use symbols that exist in price_data (e.g. skip_scraper may leave CSVs from a different run)
+    symbols = [s for s in symbols if s in price_data.columns]
+    if not symbols:
+        return {}
     # Ensure benchmark is in price_data
     if benchmark_symbol not in price_data.columns:
         # If no benchmark, can't calc alpha/beta
         benchmark_series = None
     else:
         benchmark_series = price_data[benchmark_symbol]
-        
     relevant_prices = price_data[symbols].dropna()
-    if relevant_prices.empty: return {}
-
-    total_weight = sum(portfolio_weights.values())
-    clean_weights = {k: v/total_weight for k, v in portfolio_weights.items()}
+    if relevant_prices.empty:
+        return {}
+    # Filter weights to available symbols and renormalize
+    total_weight = sum(portfolio_weights.get(s, 0) for s in symbols)
+    if total_weight <= 0:
+        return {}
+    clean_weights = {s: portfolio_weights[s] / total_weight for s in symbols}
     
     daily_returns = relevant_prices.pct_change().dropna()
     if daily_returns.empty: return {}
@@ -373,7 +391,10 @@ def get_financial_ratios(symbols):
 
 # --- Main Report Generation ---
 # --- Main Report Generation ---
-def generate_markdown(criteria_description="Default Run"):
+def generate_markdown(criteria_description="Default Run", industries_override=None):
+    """
+    industries_override: optional list from --industries CLI; overrides stats for Sectors display.
+    """
     print("Generating Final Report...")
     
     # 1. Archive previous report if exists
@@ -417,13 +438,19 @@ def generate_markdown(criteria_description="Default Run"):
     if p_min_price is None: p_min_price = "Disabled"
     if p_max_price is None: p_max_price = "Disabled"
     p_exch = "Yes" if params.get("NYSE_NASDAQ_Only", True) else "No"
-    p_industries = params.get("Industries")
+    p_industries = industries_override if industries_override is not None else params.get("Industries")
     if p_industries is not None and not isinstance(p_industries, list):
         p_industries = [s.strip() for s in str(p_industries).split(",") if s.strip()] if p_industries else None
     p_industries_str = ", ".join(p_industries) if p_industries else "All"
+    run_start = stats.get("Run_Start_Time", "N/A")
+    run_end = stats.get("Run_End_Time", "N/A")
+    run_elapsed = stats.get("Total_Time", "N/A")
     report_content += "### Run Configuration\n"
     report_content += "| Parameter | Value |\n"
     report_content += "|:---|:---|\n"
+    report_content += f"| **Start Time** | {run_start} |\n"
+    report_content += f"| **End Time** | {run_end} |\n"
+    report_content += f"| **Elapsed Time** | {run_elapsed} |\n"
     report_content += f"| **Min Trading History** | {p_min_hist} Years |\n"
     report_content += f"| **Min IPO Age** | {p_min_ipo} Years |\n"
     report_content += f"| **Max IPO Age** | {p_max_ipo} Years |\n"
@@ -436,8 +463,8 @@ def generate_markdown(criteria_description="Default Run"):
     
     report_content += "---\n\n"
     
-    # Waterfall Section
-    report_content += get_waterfall_section()
+    # Waterfall Section (pass industries_override so sector filter displays correctly)
+    report_content += get_waterfall_section(industries_override=p_industries)
     
     # Top 10 Exclusion Section
     top_10_file = os.path.join(DATA_DIR, "top_10_exclusion.json")
@@ -512,7 +539,7 @@ def generate_markdown(criteria_description="Default Run"):
             df['PEG'] = df['Symbol'].map(lambda x: ratio_data.get(x, {}).get('PEG', 'N/A'))
             df['P/B'] = df['Symbol'].map(lambda x: ratio_data.get(x, {}).get('P/B', 'N/A'))
 
-        df['Weight_Fmt'] = df['Weight'].apply(lambda x: f"{x:.2%}" if isinstance(x, float) else x)
+        df['Weight_Fmt'] = df['Weight'].apply(_fmt_weight)
         
         # Format Contribution Metrics if present
         if 'Return Contrib' in df.columns:
@@ -528,8 +555,10 @@ def generate_markdown(criteria_description="Default Run"):
         
         # Check if they exist (in case df was empty or old CSV)
         cols_to_show = [c for c in cols_to_show if c in df.columns]
-        
-        report_content += df[cols_to_show].rename(columns={'Weight_Fmt': 'Weight'}).to_markdown(index=False) + "\n\n"
+        if cols_to_show:
+            report_content += df[cols_to_show].rename(columns={'Weight_Fmt': 'Weight'}).to_markdown(index=False) + "\n\n"
+        else:
+            report_content += df.to_markdown(index=False) + "\n\n" if not df.empty else ""
         
         # Yearly Analysis
         report_content += "### Yearly Performance Analysis\n"
@@ -551,12 +580,14 @@ def generate_markdown(criteria_description="Default Run"):
             df['PEG'] = df['Symbol'].map(lambda x: ratio_data.get(x, {}).get('PEG', 'N/A'))
             df['P/B'] = df['Symbol'].map(lambda x: ratio_data.get(x, {}).get('P/B', 'N/A'))
             
-        df['Weight_Fmt'] = df['Weight'].apply(lambda x: f"{x:.2%}" if isinstance(x, float) else x)
+        df['Weight_Fmt'] = df['Weight'].apply(_fmt_weight)
         
         cols_to_show = ['Symbol', 'Weight_Fmt', 'P/E', 'PEG', 'P/B']
         cols_to_show = [c for c in cols_to_show if c in df.columns]
-        
-        report_content += df[cols_to_show].rename(columns={'Weight_Fmt': 'Weight'}).to_markdown(index=False) + "\n\n"
+        if cols_to_show:
+            report_content += df[cols_to_show].rename(columns={'Weight_Fmt': 'Weight'}).to_markdown(index=False) + "\n\n"
+        else:
+            report_content += df.to_markdown(index=False) + "\n\n" if not df.empty else ""
         
         # Yearly Analysis
         report_content += "### Yearly Performance Analysis\n"
@@ -588,10 +619,19 @@ def generate_markdown(criteria_description="Default Run"):
     print("Report Log updated.")
     
 import sys
+import argparse
+import traceback
 
 if __name__ == "__main__":
-    description = "Unknown/Manual Run"
-    if len(sys.argv) > 1:
-        description = sys.argv[1]
-    
-    generate_markdown(description)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("description", nargs="?", default="Unknown/Manual Run", help="Criteria description")
+    parser.add_argument("--industries", type=str, default=None, help="Comma-separated sectors (e.g. Technology,Energy)")
+    args = parser.parse_args()
+    industries_list = None
+    if args.industries:
+        industries_list = [s.strip() for s in args.industries.split(",") if s.strip()] or None
+    try:
+        generate_markdown(args.description, industries_override=industries_list)
+    except Exception as e:
+        traceback.print_exc()
+        sys.exit(1)

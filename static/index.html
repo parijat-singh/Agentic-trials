@@ -4,6 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Stock Analysis Pipeline</title>
     <style>
         :root {
@@ -417,17 +420,18 @@
             resultsArea.innerText = "Initializing pipeline...\n";
             isStopping = false;
 
-            // Collect Params - use valueAsNumber for numeric inputs to avoid string/empty edge cases
-            const maxPeVal = document.getElementById('max_pe').value;
-            const minMarketCapVal = document.getElementById('min_market_cap').value;
-            const minPriceEl = document.getElementById('min_price');
-            const maxPriceEl = document.getElementById('max_price');
-            const minPriceNum = minPriceEl.value !== '' ? parseFloat(minPriceEl.value) : NaN;
-            const maxPriceNum = maxPriceEl.value !== '' ? parseFloat(maxPriceEl.value) : NaN;
+            // Collect Params - read values at submit time to ensure current form state
+            const maxPeVal = (document.getElementById('max_pe').value || '').trim();
+            const minMarketCapVal = (document.getElementById('min_market_cap').value || '').trim();
+            const minPriceVal = (document.getElementById('min_price').value || '').trim();
+            const maxPriceVal = (document.getElementById('max_price').value || '').trim();
+            const minPriceNum = minPriceVal !== '' ? parseFloat(minPriceVal) : NaN;
+            const maxPriceNum = maxPriceVal !== '' ? parseFloat(maxPriceVal) : NaN;
 
             const industriesChecked = Array.from(document.querySelectorAll('input[id^="sector_"]'))
-                .filter(cb => cb.checked)
-                .map(cb => cb.value || cb.getAttribute('value'));
+                .filter(cb => cb && cb.checked)
+                .map(cb => (cb.value || cb.getAttribute('value') || '').trim())
+                .filter(Boolean);
             const payload = {
                 min_history: parseFloat(document.getElementById('min_history').value),
                 min_ipo: parseFloat(document.getElementById('min_ipo').value),
@@ -459,7 +463,7 @@
                 setRunningState(true);
 
                 // 3. Start Polling
-                pollInterval = setInterval(pollStatus, 1000);
+                pollInterval = setInterval(pollStatus, 400);  // 400ms for real-time log streaming
 
             } catch (error) {
                 statusBadge.className = 'status-badge status-error';
@@ -473,11 +477,15 @@
                 const resp = await fetch('/status');
                 const data = await resp.json();
 
-                // Update Logs
-                // Simple scroll to bottom if at bottom?
-                const atBottom = resultsArea.scrollTop + resultsArea.clientHeight >= resultsArea.scrollHeight - 50;
-                resultsArea.innerText = data.logs || "Waiting for logs...";
-                if (atBottom) resultsArea.scrollTop = resultsArea.scrollHeight;
+                // Update logs in real time (stream progress)
+                const atBottom = resultsArea.scrollTop + resultsArea.clientHeight >= resultsArea.scrollHeight - 80;
+                const newLogs = data.logs || "Waiting for logs...";
+                if (resultsArea.innerText !== newLogs) {
+                    resultsArea.innerText = newLogs;
+                    if (atBottom || data.status === 'running') resultsArea.scrollTop = resultsArea.scrollHeight;
+                } else if (atBottom) {
+                    resultsArea.scrollTop = resultsArea.scrollHeight;
+                }
 
                 // Check Status
                 if (data.status === 'completed') {

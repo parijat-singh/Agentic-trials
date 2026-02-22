@@ -8,7 +8,8 @@ addopts = "-v --tb=short"
 
 [tool.coverage.run]
 source = ["."]
-omit = ["venv/*", "tests/*", "*/test_*.py"]
+omit = ["venv/*", "tests/*", "*/test_*.py", "run_all_tests.py", "run_tests.py", "check_dates.py"]
 
 [tool.coverage.report]
 exclude_lines = ["pragma: no cover", "def __repr__"]
+fail_under = 75

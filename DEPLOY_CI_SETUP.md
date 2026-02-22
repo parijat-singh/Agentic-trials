@@ -37,7 +37,6 @@ In your repo: **Settings → Secrets and variables → Actions**, add:
 ## 3. Workflow Behavior
 
 On **push to main**:
-
 1. **Test**: Full pytest suite with coverage (min 25%)
 2. **Security**: `pip-audit` vulnerability scan
 3. **Deploy**: Build and deploy to Cloud Run (only if 1 and 2 pass)

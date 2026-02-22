@@ -9,6 +9,15 @@ Run and test the Stock Analysis Pipeline on your machine before pushing to GitHu
 - Python 3.10 or 3.11
 - (Optional) Google Drive path `G:\My Drive\Agentic-trials-data` for persistent data; otherwise uses `stock_agent/data` locally
 
+## Database Location (Local)
+
+The SQLite database is stored on the **local C: drive** to avoid cloud-sync I/O errors (OneDrive, Google Drive):
+
+- **Path:** `%LOCALAPPDATA%\stock-analysis\stock_data.db`
+- **Typical:** `C:\Users\<you>\AppData\Local\stock-analysis\stock_data.db`
+
+Data dir and reports may be in the project or on Google Drive; only the DB uses C:.
+
 ---
 
 ## 1. Create Virtual Environment

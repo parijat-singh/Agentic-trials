@@ -19,3 +19,11 @@ def test_get_risk_free_rate_empty_default():
         from financial_engine.risk_free_rate import get_risk_free_rate
         rate = get_risk_free_rate()
         assert rate == 0.04
+
+
+def test_get_risk_free_rate_exception_default():
+    with patch("financial_engine.risk_free_rate.yf") as mock_yf:
+        mock_yf.Ticker.side_effect = Exception("network error")
+        from financial_engine.risk_free_rate import get_risk_free_rate
+        rate = get_risk_free_rate()
+        assert rate == 0.04

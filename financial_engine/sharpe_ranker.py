@@ -83,11 +83,13 @@ def rank_stocks(data_dir, risk_free_rate):
 
     if os.path.exists(meta_file):
         meta_df = pd.read_csv(meta_file)
-        # Filter by industry/sector if specified in Parameters
+        # Filter by industry/sector if specified in Parameters (case-insensitive)
         sector_col = 'sector' if 'sector' in meta_df.columns else ('Sector' if 'Sector' in meta_df.columns else None)
         if industries_filter and sector_col and sector_col in meta_df.columns:
             before = len(meta_df)
-            meta_df = meta_df[meta_df[sector_col].notna() & meta_df[sector_col].isin(industries_filter)]
+            inds_lower = [str(s).strip().lower() for s in industries_filter]
+            meta_df = meta_df[meta_df[sector_col].notna() & meta_df[sector_col].apply(
+                lambda s: str(s).strip().lower() in inds_lower if s is not None and str(s).strip() else False)]
             if len(meta_df) < before:
                 print(f"Industry filter (sharpe_ranker): {before} -> {len(meta_df)} stocks")
         # Handle Symbol case and map PE

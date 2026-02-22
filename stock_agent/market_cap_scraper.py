@@ -351,10 +351,10 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
             if nyse_nasdaq_only and not is_nyse_or_nasdaq(c['exchange']):
                 stats["Skipped_Exchange"] += 1
                 continue
-            # Industry filter: only include selected sectors
+            # Industry filter: only include selected sectors (case-insensitive)
             if industries and len(industries) > 0:
-                sector = (c.get('sector') or '').strip()
-                if sector not in [s.strip() for s in industries]:
+                sector = (c.get('sector') or '').strip().lower()
+                if sector not in [str(s).strip().lower() for s in industries]:
                     stats["Skipped_Industry"] += 1
                     continue
             start_date = df.index[0]
@@ -434,7 +434,7 @@ def main():
     nyse_nasdaq_only = not args.no_exchange_filter
     industries = [s.strip() for s in (args.industries or "").split(",") if s.strip()] or None
 
-    price_range = f"${args.min_price or 0}-{args.max_price or '∞'}" if (args.min_price or args.max_price) else "Any"
+    price_range = f"${args.min_price or 0}-{args.max_price or 'inf'}" if (args.min_price or args.max_price) else "Any"
     print(f"=== Stock Data Agent: Scan (IPO {args.min_ipo}-{args.max_ipo}y, Hist {args.min_history}y, P/E < {args.max_pe}, Cap > {args.min_market_cap}B, Price {price_range}, NYSE/NASDAQ: {nyse_nasdaq_only}) ===")
     
     collected_stocks = []

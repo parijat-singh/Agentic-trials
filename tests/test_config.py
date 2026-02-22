@@ -23,3 +23,5 @@ def test_config_dirs_exist():
     import config
     assert os.path.isdir(config.DATA_DIR)
     assert os.path.isdir(config.ARCHIVE_DIR)
+
+

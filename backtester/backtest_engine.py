@@ -1,22 +1,65 @@
 import pandas as pd
 import numpy as np
 import os
+import sys
 import glob
+import json
 from scipy.optimize import minimize
+
+def _sector_in_industries(sector, industries_list):
+    """Case-insensitive check if sector is in industries list."""
+    if not sector or not industries_list:
+        return False
+    s = str(sector).strip().lower()
+    return s in [str(i).strip().lower() for i in industries_list]
 
 def load_3y_data(data_dir):
     """
     Loads daily close prices for all stocks in data_dir.
     Filters for stocks with at least 3 years of data.
+    Applies industry/sector filter from scraping_stats.json when set.
     Returns: DataFrame of prices (Forward Filled).
     """
-    # Use metadata file source of truth
-    # Use metadata file source of truth
     meta_file = os.path.join(data_dir, "top_100_new_stocks.csv")
+    industries_filter = None
+    stats_file = os.path.join(data_dir, "scraping_stats.json")
+    if os.path.exists(stats_file):
+        try:
+            with open(stats_file, 'r') as f:
+                params = json.load(f).get("Parameters", {})
+            industries_filter = params.get("Industries")
+            if industries_filter is not None and not isinstance(industries_filter, list):
+                industries_filter = [s.strip() for s in str(industries_filter).split(",") if s.strip()] or None
+        except Exception:
+            pass
+
     if os.path.exists(meta_file):
         meta_df = pd.read_csv(meta_file)
-        if 'symbol' in meta_df.columns:
-            csv_files = [os.path.join(data_dir, f"{s}.csv") for s in meta_df['symbol']]
+        sym_col = 'symbol' if 'symbol' in meta_df.columns else 'Symbol'
+        sector_col = 'sector' if 'sector' in meta_df.columns else ('Sector' if 'Sector' in meta_df.columns else None)
+
+        # Enrich sector from DB if missing and industry filter is active
+        if industries_filter and (sector_col is None or (sector_col in meta_df.columns and meta_df[sector_col].isna().all())):
+            try:
+                sys_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                if sys_path not in sys.path:
+                    sys.path.insert(0, sys_path)
+                from stock_agent.db_manager import DBManager
+                db = DBManager()
+                sector_col = 'sector'
+                meta_df[sector_col] = meta_df[sym_col].map(lambda s: db.get_sector(s) if isinstance(s, str) else None)
+            except Exception:
+                sector_col = None
+
+        # Filter by sector when industries specified
+        if industries_filter and sector_col and sector_col in meta_df.columns:
+            before = len(meta_df)
+            meta_df = meta_df[meta_df[sector_col].apply(lambda s: _sector_in_industries(s, industries_filter))]
+            if len(meta_df) < before:
+                print(f"Industry filter (backtester): {before} -> {len(meta_df)} stocks (sectors: {', '.join(industries_filter)})")
+
+        if sym_col in meta_df.columns:
+            csv_files = [os.path.join(data_dir, f"{s}.csv") for s in meta_df[sym_col]]
             csv_files = [f for f in csv_files if os.path.exists(f)]
         else:
             csv_files = glob.glob(os.path.join(data_dir, "*.csv"))

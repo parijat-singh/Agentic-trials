@@ -13,17 +13,19 @@ sys.path.insert(0, BASE)
 
 def test_api_analyze_industries_in_command():
     """Verify API adds --industries= to the subprocess command when industries provided."""
+    import asyncio
     with patch("api_server.state") as mock_state:
         mock_state.status = "idle"
         mock_state.process = None
         with patch("api_server.threading.Thread") as mock_thread:
             from api_server import run_analysis, AnalyzeRequest
-            run_analysis(AnalyzeRequest(
+            asyncio.run(run_analysis(AnalyzeRequest(
                 min_history=5.0, min_ipo=5.0, max_ipo=10.0,
                 industries=["Technology", "Healthcare"]
-            ))
+            )))
             # Thread(target=run_pipeline_background, args=(cmd, cwd))
-            cmd = mock_thread.call_args[1]["args"][0]
+            call_kwargs = mock_thread.call_args[1]
+            cmd = call_kwargs["args"][0]
     ind_arg = [a for a in cmd if a.startswith("--industries=")]
     assert len(ind_arg) == 1, f"Expected --industries= in cmd: {cmd}"
     assert "Technology" in ind_arg[0]

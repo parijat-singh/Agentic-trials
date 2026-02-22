@@ -11,6 +11,18 @@ import time
 
 app = FastAPI(title="Stock Analysis API", description="API to trigger stock analysis pipeline with custom filters.")
 
+
+@app.middleware("http")
+async def add_no_cache_static(request, call_next):
+    """Prevent caching of static assets so users always get the latest UI."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Global State
@@ -63,14 +75,17 @@ def run_pipeline_background(cmd, cwd):
             log_file.flush()
             
             # Start Process with pipes for stdout/stderr
-            # bufsize=1 means line buffered
+            # bufsize=1 = line buffered; PYTHONUNBUFFERED for child processes
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
             p = subprocess.Popen(
-                cmd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.STDOUT, 
-                text=True, 
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
                 cwd=cwd,
                 bufsize=1,
+                env=env,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
             )
             state.process = p
@@ -111,46 +126,43 @@ def run_pipeline_background(cmd, cwd):
         state.process = None
 
 @app.post("/analyze")
-def run_analysis(request: AnalyzeRequest):
+async def run_analysis(req: AnalyzeRequest):
     """
     Triggers the full analysis pipeline in BACKGROUND.
     Returns immediate success if started.
     """
     global state
-    
+
     if state.status == "running":
         raise HTTPException(status_code=400, detail="Pipeline is already running.")
-        
+
     # Construct command
     cmd = [sys.executable, "-u", "run_pipeline.py"]
     
-    cmd.append(f"--min-history={request.min_history}")
-    cmd.append(f"--min-ipo={request.min_ipo}")
-    cmd.append(f"--max-ipo={request.max_ipo}")
-    cmd.append(f"--max-pages={request.max_pages}")
+    cmd.append(f"--min-history={req.min_history}")
+    cmd.append(f"--min-ipo={req.min_ipo}")
+    cmd.append(f"--max-ipo={req.max_ipo}")
+    cmd.append(f"--max-pages={req.max_pages}")
     
-    if request.max_pe is not None:
-        cmd.append(f"--max-pe={request.max_pe}")
+    if req.max_pe is not None:
+        cmd.append(f"--max-pe={req.max_pe}")
 
-    if request.min_market_cap is not None:
-        cmd.append(f"--min-market-cap={request.min_market_cap}")
-    if request.min_price is not None:
-        cmd.append(f"--min-price={request.min_price}")
-    if request.max_price is not None:
-        cmd.append(f"--max-price={request.max_price}")
-    if request.no_exchange_filter:
+    if req.min_market_cap is not None:
+        cmd.append(f"--min-market-cap={req.min_market_cap}")
+    if req.min_price is not None:
+        cmd.append(f"--min-price={req.min_price}")
+    if req.max_price is not None:
+        cmd.append(f"--max-price={req.max_price}")
+    if req.no_exchange_filter:
         cmd.append("--no-exchange-filter")
-    industries = request.industries if request.industries is not None else []
-    if isinstance(industries, list) and len(industries) > 0:
-        industries_str = ",".join(str(s).strip() for s in industries if s)
-        if industries_str:
-            cmd.append(f"--industries={industries_str}")
+    industries = req.industries if req.industries is not None else []
+    industries_str = ",".join(str(s).strip() for s in industries if s) if isinstance(industries, list) else ""
+    if isinstance(industries, list) and len(industries) > 0 and industries_str:
+        cmd.append(f"--industries={industries_str}")
 
-    if request.skip_scraper:
+    if req.skip_scraper:
         cmd.append("--skip-scraper")
-        
-    print(f"API Triggering Pipeline: {' '.join(cmd)}")
-    
+
     cwd = os.path.dirname(os.path.abspath(__file__))
     
     # Start Thread
