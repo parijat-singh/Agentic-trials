@@ -15,12 +15,15 @@ def _sector_in_industries(sector, industries_list):
 
 def load_3y_data(data_dir):
     """
-    Loads daily close prices for all stocks in data_dir.
-    Filters for stocks with at least 3 years of data.
-    Applies industry/sector filter from scraping_stats.json when set.
+    Loads daily close prices for stocks in data_dir.
+    Prefers top_50_stocks.csv (P/E-filtered) when available; otherwise uses top_100_new_stocks.csv.
+    Applies industry/sector filter from scraping_stats.json when using top_100.
     Returns: DataFrame of prices (Forward Filled).
     """
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    top_50_file = os.path.join(root_dir, "financial_engine", "top_50_stocks.csv")
     meta_file = os.path.join(data_dir, "top_100_new_stocks.csv")
+    csv_files = []
     industries_filter = None
     stats_file = os.path.join(data_dir, "scraping_stats.json")
     if os.path.exists(stats_file):
@@ -33,7 +36,18 @@ def load_3y_data(data_dir):
         except Exception:
             pass
 
-    if os.path.exists(meta_file):
+    if os.path.exists(top_50_file):
+        meta_df = pd.read_csv(top_50_file)
+        sym_col = 'Symbol' if 'Symbol' in meta_df.columns else 'symbol'
+        if sym_col in meta_df.columns:
+            csv_files = [os.path.join(data_dir, f"{s}.csv") for s in meta_df[sym_col]]
+            csv_files = [f for f in csv_files if os.path.exists(f)]
+        else:
+            csv_files = []
+        if csv_files:
+            print(f"Using top_50 (P/E-filtered) as candidate universe: {len(csv_files)} stocks")
+
+    if not csv_files and os.path.exists(meta_file):
         meta_df = pd.read_csv(meta_file)
         sym_col = 'symbol' if 'symbol' in meta_df.columns else 'Symbol'
         sector_col = 'sector' if 'sector' in meta_df.columns else ('Sector' if 'Sector' in meta_df.columns else None)
@@ -63,7 +77,7 @@ def load_3y_data(data_dir):
             csv_files = [f for f in csv_files if os.path.exists(f)]
         else:
             csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
-    else:
+    elif not csv_files:
         csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
 
     print(f"Scanning {len(csv_files)} files (from metadata) in {data_dir}...")

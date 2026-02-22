@@ -56,12 +56,13 @@ def get_exclusion_reason(symbol, params, portfolio_symbols):
              # Or just skip IPO check if data missing.
              pass
 
-        # P/E Check
+        # P/E Check (sector-specific)
         pe = info.get('trailingPE')
         if pe is None:
             pe = info.get('forwardPE')
-            
-        max_pe = params.get('Max_PE')
+        sector = info.get('sector')
+        max_pe_by_sector = params.get('Max_PE_By_Sector')
+        max_pe = max_pe_by_sector.get(sector) if (max_pe_by_sector and sector and isinstance(max_pe_by_sector, dict)) else None
         if max_pe and pe:
             if pe > max_pe:
                 return f"Excluded: High P/E ({pe:.2f} > {max_pe})"

@@ -20,7 +20,7 @@ def test_api_analyze_industries_in_command():
         with patch("api_server.threading.Thread") as mock_thread:
             from api_server import run_analysis, AnalyzeRequest
             asyncio.run(run_analysis(AnalyzeRequest(
-                min_history=5.0, min_ipo=5.0, max_ipo=10.0,
+                min_history=5.0, max_ipo=10.0,
                 industries=["Technology", "Healthcare"]
             )))
             # Thread(target=run_pipeline_background, args=(cmd, cwd))
@@ -58,8 +58,8 @@ def test_report_waterfall_includes_sector_filter_when_industries_set(temp_dir):
         "Skipped_PE": 0, "Skipped_Market_Cap": 0, "Skipped_Exchange": 0,
         "Skipped_Price": 0, "Skipped_Industry": 5, "Errors": 0, "Selected": 95,
         "Parameters": {
-            "Min_History": 5, "Min_IPO": 5, "Max_IPO": 10, "Max_PE": 25,
-            "Min_Market_Cap": None, "Min_Price": None, "Max_Price": None,
+            "Min_History": 5, "Min_IPO": 5, "Max_IPO": 10, "Max_PE_By_Sector": {"Technology": 25},
+            "Min_Market_Cap": None, "Min_Price": None,
             "NYSE_NASDAQ_Only": True, "Industries": ["Technology", "Energy"], "Max_Pages": 200
         }
     }

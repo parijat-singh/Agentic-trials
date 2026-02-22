@@ -205,7 +205,7 @@ def test_process_batch_industry_filter(mock_config):
                         mock_meta.return_value = ("NMS", "Healthcare")
                         accepted, stats, _ = process_batch(
                             companies, min_history=3, min_ipo_age=3, max_ipo_age=20,
-                            max_pe=25, nyse_nasdaq_only=True, industries=["Technology"]
+                            max_pe_by_sector={"Technology": 25}, nyse_nasdaq_only=True, industries=["Technology"]
                         )
                         assert stats["Skipped_Industry"] == 1
                         assert len(accepted) == 0
@@ -215,7 +215,7 @@ def test_process_batch_empty_candidates():
     companies = [{"symbol": "BP.L", "name": "BP", "market_cap": "$100B"}]
     accepted, stats, stop = process_batch(
         companies, min_history=5, min_ipo_age=5, max_ipo_age=10,
-        max_pe=None, min_market_cap=None
+        max_pe_by_sector=None, min_market_cap=None
     )
     assert len(accepted) == 0
     assert stats["Non_US"] == 1
@@ -229,7 +229,7 @@ def test_process_batch_min_market_cap_stop_condition(mock_config):
     with patch("stock_agent.market_cap_scraper.DATA_DIR", mock_config["DATA_DIR"]):
         accepted, stats, stop = process_batch(
             companies, min_history=5, min_ipo_age=5, max_ipo_age=10,
-            max_pe=None, min_market_cap=1.0
+            max_pe_by_sector=None, min_market_cap=1.0
         )
         assert stop is True
         assert "Skipped_Market_Cap" in stats or len(accepted) == 0
@@ -257,7 +257,7 @@ def test_process_batch_with_mocked_yfinance(mock_config):
                         mock_meta.return_value = ("NMS", "Technology")
                         accepted, stats, stop = process_batch(
                             companies, min_history=3, min_ipo_age=3, max_ipo_age=20,
-                            max_pe=25, min_market_cap=None, nyse_nasdaq_only=True,
+                            max_pe_by_sector={"Technology": 25}, min_market_cap=None, nyse_nasdaq_only=True,
                             industries=None
                         )
     assert "Scanned" in stats
@@ -286,6 +286,6 @@ def test_process_batch_fresh_download_mocked(mock_config):
                             mock_meta.return_value = ("NMS", "Technology")
                             accepted, stats, stop = process_batch(
                                 companies, min_history=3, min_ipo_age=3, max_ipo_age=20,
-                                max_pe=30, min_market_cap=None, nyse_nasdaq_only=True
+                                max_pe_by_sector={"Technology": 30}, min_market_cap=None, nyse_nasdaq_only=True
                             )
     assert "Scanned" in stats

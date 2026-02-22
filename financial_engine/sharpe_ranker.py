@@ -56,8 +56,8 @@ def rank_stocks(data_dir, risk_free_rate):
     """
     results = []
     
-    # Load Max_PE, Min_History, Industries from stats if available
-    max_pe = None
+    # Load Max_PE_By_Sector, Min_History, Industries from stats if available
+    max_pe_by_sector = None
     min_history = None
     industries_filter = None
     stats_file = os.path.join(data_dir, "scraping_stats.json")
@@ -66,12 +66,14 @@ def rank_stocks(data_dir, risk_free_rate):
             import json
             with open(stats_file, 'r') as f:
                 params = json.load(f).get("Parameters", {})
-                max_pe = params.get("Max_PE")
+                max_pe_by_sector = params.get("Max_PE_By_Sector")
+                if max_pe_by_sector is not None and not isinstance(max_pe_by_sector, dict):
+                    max_pe_by_sector = None
                 min_history = params.get("Min_History")
                 industries_filter = params.get("Industries")
                 if industries_filter is not None and not isinstance(industries_filter, list):
                     industries_filter = [s.strip() for s in str(industries_filter).split(",") if s.strip()] or None
-                print(f"DEBUG: sharpe_ranker loaded Max_PE: {max_pe}, Min_History: {min_history}")
+                print(f"DEBUG: sharpe_ranker loaded Max_PE_By_Sector: {max_pe_by_sector}, Min_History: {min_history}")
         except Exception as e: 
             print(f"DEBUG: sharpe_ranker failed to load stats: {e}")
             pass
@@ -80,6 +82,7 @@ def rank_stocks(data_dir, risk_free_rate):
     meta_file = os.path.join(data_dir, "top_100_new_stocks.csv")
     symbols = []
     symbol_pe_map = {}
+    symbol_sector_map = {}
 
     if os.path.exists(meta_file):
         meta_df = pd.read_csv(meta_file)
@@ -92,12 +95,15 @@ def rank_stocks(data_dir, risk_free_rate):
                 lambda s: str(s).strip().lower() in inds_lower if s is not None and str(s).strip() else False)]
             if len(meta_df) < before:
                 print(f"Industry filter (sharpe_ranker): {before} -> {len(meta_df)} stocks")
-        # Handle Symbol case and map PE
+        # Handle Symbol case and map PE + sector
         sym_col = 'symbol' if 'symbol' in meta_df.columns else 'Symbol'
+        symbol_sector_map = {}
         if sym_col in meta_df.columns:
             symbols = meta_df[sym_col].tolist()
             if 'pe_ratio' in meta_df.columns:
                 symbol_pe_map = meta_df.set_index(sym_col)['pe_ratio'].to_dict()
+            if sector_col and sector_col in meta_df.columns:
+                symbol_sector_map = meta_df.set_index(sym_col)[sector_col].to_dict()
         else:
              print("Warning: 'symbol' column not found in metadata.")
     else:
@@ -222,13 +228,26 @@ def rank_stocks(data_dir, risk_free_rate):
     
     for _, row in top_candidates.iterrows():
         symbol = row['Symbol']
+        sector = symbol_sector_map.get(symbol)
+        if (sector is None or (isinstance(sector, float) and pd.isna(sector))) and max_pe_by_sector:
+            try:
+                sector = db.get_sector(symbol)
+            except Exception:
+                sector = None
+        if sector is None or (isinstance(sector, float) and pd.isna(sector)):
+            sector = None
+        if max_pe_by_sector and sector:
+            sector_str = str(sector).strip()
+            max_pe = next((max_pe_by_sector[k] for k in max_pe_by_sector if str(k).strip().lower() == sector_str.lower()), None)
+        else:
+            max_pe = None
         pe = symbol_pe_map.get(symbol)
         
         if max_pe is not None and (pe is None or pd.isna(pe)):
             pe = get_pe_ratio(symbol)
 
         if max_pe is not None:
-            # If we have a filter, exclude N/A or over-threshold
+            # If we have a sector-specific filter, exclude N/A or over-threshold
             is_na = pd.isna(pe)
             if is_na or pe > max_pe or pe < 0:
                 continue

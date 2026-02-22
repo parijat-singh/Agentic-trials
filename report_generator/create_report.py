@@ -24,8 +24,9 @@ LOG_FILE = os.path.join(ROOT_DIR, "REPORT_LOG.md")
 
 import json
 
-def get_waterfall_section(industries_override=None):
-    """industries_override: list of sector names from --industries CLI (overrides stats when set)"""
+def get_waterfall_section(industries_override=None, max_pe_by_sector_override=None):
+    """industries_override: list of sector names from --industries CLI (overrides stats when set)
+    max_pe_by_sector_override: dict from --max-pe-by-sector CLI (overrides stats when set)"""
     stats = {}
     if os.path.exists(FILE_STATS):
         try:
@@ -61,7 +62,9 @@ def get_waterfall_section(industries_override=None):
     p_min_hist = params.get("Min_History", 5)
     p_min_ipo = params.get("Min_IPO", 5)
     p_max_ipo = params.get("Max_IPO", 10)
-    p_max_pe = params.get("Max_PE", None)
+    p_max_pe_by_sector = max_pe_by_sector_override if max_pe_by_sector_override is not None else params.get("Max_PE_By_Sector")
+    if p_max_pe_by_sector is not None and not isinstance(p_max_pe_by_sector, dict):
+        p_max_pe_by_sector = None
 
     # Markdown Table
     md = "## Stock Selection Waterfall\n\n"
@@ -81,22 +84,19 @@ def get_waterfall_section(industries_override=None):
     md += f"| *Filter: Too Old* | IPO > {p_max_ipo} Years ago | -{count_too_old} |\n"
     md += f"| *Filter: Too New* | History < {p_min_hist} Years or IPO < {p_min_ipo} Years | -{count_too_new} |\n"
     
-    pe_desc = f"P/E > {p_max_pe} or N/A" if p_max_pe else "P/E Filter Disabled"
-    if p_max_pe:
-         # Need to handle if "Skipped_PE" key exists, else 0
+    pe_desc = f"P/E by sector: {p_max_pe_by_sector}" if p_max_pe_by_sector else "P/E Filter Disabled"
+    if p_max_pe_by_sector:
          count_skipped_pe = stats.get("Skipped_PE", 0)
-         md += f"| *Filter: P/E Ratio* | {pe_desc} | -{count_skipped_pe} |\n"
+         md += f"| *Filter: P/E by Sector* | {pe_desc} | -{count_skipped_pe} |\n"
 
     p_min_cap = params.get("Min_Market_Cap", None)
     if p_min_cap:
         count_skipped_cap = stats.get("Skipped_Market_Cap", 0)
         md += f"| *Filter: Market Cap* | Cap < ${p_min_cap}B | -{count_skipped_cap} |\n"
     p_min_pr = params.get("Min_Price")
-    p_max_pr = params.get("Max_Price")
-    if p_min_pr is not None or p_max_pr is not None:
+    if p_min_pr is not None:
         count_skipped_pr = stats.get("Skipped_Price", 0)
-        pr_desc = f"${p_min_pr}-${p_max_pr}" if (p_min_pr and p_max_pr) else (f"< ${p_min_pr}" if p_min_pr else f"> ${p_max_pr}")
-        md += f"| *Filter: Price* | Outside {pr_desc} | -{count_skipped_pr} |\n"
+        md += f"| *Filter: Min Price* | Price < ${p_min_pr} | -{count_skipped_pr} |\n"
          
     md += f"| *Filter: Errors* | Data fetch errors | -{count_errors} |\n"
     md += f"| **2. Candidates** | Passed all criteria | **{count_selected}** |\n"
@@ -391,9 +391,10 @@ def get_financial_ratios(symbols):
 
 # --- Main Report Generation ---
 # --- Main Report Generation ---
-def generate_markdown(criteria_description="Default Run", industries_override=None):
+def generate_markdown(criteria_description="Default Run", industries_override=None, max_pe_by_sector_override=None):
     """
     industries_override: optional list from --industries CLI; overrides stats for Sectors display.
+    max_pe_by_sector_override: optional dict from --max-pe-by-sector CLI; overrides stats for Max P/E by Sector display.
     """
     print("Generating Final Report...")
     
@@ -417,9 +418,10 @@ def generate_markdown(criteria_description="Default Run", industries_override=No
     p_min_hist = params.get("Min_History", "N/A")
     p_min_ipo = params.get("Min_IPO", "N/A")
     p_max_ipo = params.get("Max_IPO", "N/A")
-    p_max_pe = params.get("Max_PE", "Disabled")
-    if p_max_pe is None: p_max_pe = "Disabled"
-    
+    p_max_pe_by_sector = max_pe_by_sector_override if max_pe_by_sector_override is not None else params.get("Max_PE_By_Sector")
+    p_max_pe_display = p_max_pe_by_sector if (p_max_pe_by_sector and isinstance(p_max_pe_by_sector, dict)) else "Disabled"
+    p_max_pe_for_waterfall = p_max_pe_by_sector if (p_max_pe_by_sector and isinstance(p_max_pe_by_sector, dict)) else None
+
     report_content = ""
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
     
@@ -434,9 +436,7 @@ def generate_markdown(criteria_description="Default Run", industries_override=No
     else: p_min_cap = f"${p_min_cap}B"
 
     p_min_price = params.get("Min_Price", "Disabled")
-    p_max_price = params.get("Max_Price", "Disabled")
     if p_min_price is None: p_min_price = "Disabled"
-    if p_max_price is None: p_max_price = "Disabled"
     p_exch = "Yes" if params.get("NYSE_NASDAQ_Only", True) else "No"
     p_industries = industries_override if industries_override is not None else params.get("Industries")
     if p_industries is not None and not isinstance(p_industries, list):
@@ -454,17 +454,16 @@ def generate_markdown(criteria_description="Default Run", industries_override=No
     report_content += f"| **Min Trading History** | {p_min_hist} Years |\n"
     report_content += f"| **Min IPO Age** | {p_min_ipo} Years |\n"
     report_content += f"| **Max IPO Age** | {p_max_ipo} Years |\n"
-    report_content += f"| **Max P/E Ratio** | {p_max_pe} |\n"
+    report_content += f"| **Max P/E by Sector** | {p_max_pe_display} |\n"
     report_content += f"| **Min Market Cap** | {p_min_cap} |\n"
     report_content += f"| **Min Price** | {p_min_price} |\n"
-    report_content += f"| **Max Price** | {p_max_price} |\n"
     report_content += f"| **NYSE/NASDAQ Only** | {p_exch} |\n"
     report_content += f"| **Sectors** | {p_industries_str} |\n\n"
     
     report_content += "---\n\n"
     
-    # Waterfall Section (pass industries_override so sector filter displays correctly)
-    report_content += get_waterfall_section(industries_override=p_industries)
+    # Waterfall Section (pass overrides so filters display correctly)
+    report_content += get_waterfall_section(industries_override=p_industries, max_pe_by_sector_override=p_max_pe_for_waterfall)
     
     # Top 10 Exclusion Section
     top_10_file = os.path.join(DATA_DIR, "top_10_exclusion.json")
@@ -626,12 +625,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("description", nargs="?", default="Unknown/Manual Run", help="Criteria description")
     parser.add_argument("--industries", type=str, default=None, help="Comma-separated sectors (e.g. Technology,Energy)")
+    parser.add_argument("--max-pe-by-sector", type=str, default=None, help='JSON dict of sector->max P/E (e.g. {"Technology":40,"Energy":30})')
     args = parser.parse_args()
     industries_list = None
     if args.industries:
         industries_list = [s.strip() for s in args.industries.split(",") if s.strip()] or None
+    max_pe_override = None
+    if args.max_pe_by_sector:
+        try:
+            max_pe_override = json.loads(args.max_pe_by_sector)
+            if not isinstance(max_pe_override, dict):
+                max_pe_override = None
+        except (json.JSONDecodeError, TypeError):
+            max_pe_override = None
     try:
-        generate_markdown(args.description, industries_override=industries_list)
+        generate_markdown(args.description, industries_override=industries_list, max_pe_by_sector_override=max_pe_override)
     except Exception as e:
         traceback.print_exc()
         sys.exit(1)

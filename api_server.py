@@ -4,7 +4,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import subprocess
 import os
-from typing import Optional, List
+from typing import Optional, List, Dict
 import sys
 import threading
 import time
@@ -40,12 +40,10 @@ async def read_root():
 
 class AnalyzeRequest(BaseModel):
     min_history: float = 5.0
-    min_ipo: float = 5.0
     max_ipo: float = 10.0
     min_market_cap: Optional[float] = None
-    max_pe: Optional[float] = None
+    max_pe_by_sector: Optional[Dict[str, float]] = None  # e.g. {"Technology": 30, "Healthcare": 25}
     min_price: Optional[float] = None
-    max_price: Optional[float] = None
     no_exchange_filter: bool = False
     industries: Optional[List[str]] = None
     max_pages: int = 200
@@ -140,19 +138,18 @@ async def run_analysis(req: AnalyzeRequest):
     cmd = [sys.executable, "-u", "run_pipeline.py"]
     
     cmd.append(f"--min-history={req.min_history}")
-    cmd.append(f"--min-ipo={req.min_ipo}")
+    cmd.append(f"--min-ipo={req.min_history}")
     cmd.append(f"--max-ipo={req.max_ipo}")
     cmd.append(f"--max-pages={req.max_pages}")
     
-    if req.max_pe is not None:
-        cmd.append(f"--max-pe={req.max_pe}")
+    if req.max_pe_by_sector:
+        import json
+        cmd.append(f"--max-pe-by-sector={json.dumps(req.max_pe_by_sector)}")
 
     if req.min_market_cap is not None:
         cmd.append(f"--min-market-cap={req.min_market_cap}")
     if req.min_price is not None:
         cmd.append(f"--min-price={req.min_price}")
-    if req.max_price is not None:
-        cmd.append(f"--max-price={req.max_price}")
     if req.no_exchange_filter:
         cmd.append("--no-exchange-filter")
     industries = req.industries if req.industries is not None else []

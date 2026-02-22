@@ -180,11 +180,12 @@ def parse_market_cap(mcap_str):
     except:
         return None
 
-def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_market_cap=None,
-                  min_price=None, max_price=None, nyse_nasdaq_only=True, industries=None):
+def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe_by_sector=None, min_market_cap=None,
+                  min_price=None, nyse_nasdaq_only=True, industries=None):
     """
     Takes a list of company dicts.
     Filters by Market Cap (Pre-fetch), Date and P/E (Post-fetch).
+    max_pe_by_sector: dict mapping sector name -> max P/E (e.g. {"Technology": 30, "Healthcare": 25})
     Uses SQLite DB to store/retrieve historical data, speeding up subsequent runs.
     """
     try:
@@ -374,23 +375,22 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe, min_
                  stats["Too_New"] += 1
                  continue
             
-            # P/E Check (Fetch always for downstream, filter if requested)
+            # P/E Check (Fetch always for downstream, filter if requested for this sector)
             pe = get_pe_ratio(sym)
+            sector = c.get('sector')
+            max_pe = max_pe_by_sector.get(sector) if (max_pe_by_sector and sector) else None
             if max_pe is not None:
                 if pe is None or pe > max_pe or pe < 0:
                     stats["Skipped_PE"] += 1
                     continue
-            # Current price filter
-            if min_price is not None or max_price is not None:
+            # Current price filter (min only)
+            if min_price is not None:
                 price = get_current_price(sym)
                 if price is not None:
-                    if min_price is not None and price < min_price:
+                    if price < min_price:
                         stats["Skipped_Price"] += 1
                         continue
-                    if max_price is not None and price > max_price:
-                        stats["Skipped_Price"] += 1
-                        continue
-                elif min_price is not None or max_price is not None:
+                else:
                     stats["Skipped_Price"] += 1
                     continue
             
@@ -421,7 +421,8 @@ def main():
     parser.add_argument("--min-history", type=float, default=5, help="Minimum years of history")
     parser.add_argument("--min-ipo", type=float, default=5, help="Minimum years since IPO")
     parser.add_argument("--max-ipo", type=float, default=10, help="Maximum years since IPO")
-    parser.add_argument("--max-pe", type=float, default=None, help="Maximum P/E Ratio (None to disable)")
+    parser.add_argument("--max-pe-by-sector", type=str, default=None,
+                        help="JSON dict sector->max P/E (e.g. {\"Technology\":30,\"Healthcare\":25})")
     parser.add_argument("--min-market-cap", type=float, default=None, help="Minimum Market Cap in Billions")
     parser.add_argument("--min-price", type=float, default=None, help="Minimum current stock price ($)")
     parser.add_argument("--max-price", type=float, default=None, help="Maximum current stock price ($)")
@@ -434,8 +435,18 @@ def main():
     nyse_nasdaq_only = not args.no_exchange_filter
     industries = [s.strip() for s in (args.industries or "").split(",") if s.strip()] or None
 
-    price_range = f"${args.min_price or 0}-{args.max_price or 'inf'}" if (args.min_price or args.max_price) else "Any"
-    print(f"=== Stock Data Agent: Scan (IPO {args.min_ipo}-{args.max_ipo}y, Hist {args.min_history}y, P/E < {args.max_pe}, Cap > {args.min_market_cap}B, Price {price_range}, NYSE/NASDAQ: {nyse_nasdaq_only}) ===")
+    max_pe_by_sector = None
+    if args.max_pe_by_sector:
+        try:
+            max_pe_by_sector = json.loads(args.max_pe_by_sector)
+            if not isinstance(max_pe_by_sector, dict):
+                max_pe_by_sector = None
+        except (json.JSONDecodeError, TypeError):
+            max_pe_by_sector = None
+
+    price_range = f"> ${args.min_price}" if args.min_price else "Any"
+    pe_info = f"P/E by sector: {max_pe_by_sector}" if max_pe_by_sector else "P/E: None"
+    print(f"=== Stock Data Agent: Scan (IPO {args.min_ipo}-{args.max_ipo}y, Hist {args.min_history}y, {pe_info}, Cap > {args.min_market_cap}B, Price {price_range}, NYSE/NASDAQ: {nyse_nasdaq_only}) ===")
     
     collected_stocks = []
     
@@ -467,8 +478,8 @@ def main():
         print(f"Found {len(companies)} companies. Checking filters...", flush=True)
         
         accepted_batch, batch_stats, stop_scan = process_batch(
-            companies, args.min_history, args.min_ipo, args.max_ipo, args.max_pe,
-            min_market_cap=args.min_market_cap, min_price=args.min_price, max_price=args.max_price,
+            companies, args.min_history, args.min_ipo, args.max_ipo, max_pe_by_sector,
+            min_market_cap=args.min_market_cap, min_price=args.min_price,
             nyse_nasdaq_only=nyse_nasdaq_only, industries=industries
         )
         
@@ -500,10 +511,9 @@ def main():
         "Min_History": args.min_history,
         "Min_IPO": args.min_ipo,
         "Max_IPO": args.max_ipo,
-        "Max_PE": args.max_pe,
+        "Max_PE_By_Sector": max_pe_by_sector,
         "Min_Market_Cap": args.min_market_cap,
         "Min_Price": args.min_price,
-        "Max_Price": args.max_price,
         "NYSE_NASDAQ_Only": nyse_nasdaq_only,
         "Industries": industries
     }

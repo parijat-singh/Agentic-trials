@@ -44,12 +44,12 @@ def main():
     parser = argparse.ArgumentParser(description="Run Full Analysis Pipeline")
     parser.add_argument("--interactive", action="store_true", help="Ask for parameters interactively")
     parser.add_argument("--min-history", type=float, help="Minimum years of history")
-    parser.add_argument("--min-ipo", type=float, help="Minimum years since IPO")
+    parser.add_argument("--min-ipo", type=float, help="Minimum years since IPO (defaults to min-history)")
     parser.add_argument("--max-ipo", type=float, help="Maximum years since IPO")
-    parser.add_argument("--max-pe", type=float, help="Maximum P/E Ratio")
+    parser.add_argument("--max-pe-by-sector", type=str, default=None,
+                        help="JSON dict of sector->max P/E (e.g. {\"Technology\":30,\"Healthcare\":25})")
     parser.add_argument("--min-market-cap", type=float, help="Minimum Market Cap in Billions")
     parser.add_argument("--min-price", type=float, help="Minimum current stock price ($)")
-    parser.add_argument("--max-price", type=float, help="Maximum current stock price ($)")
     parser.add_argument("--no-exchange-filter", action="store_true", help="Disable NYSE/NASDAQ-only filter")
     parser.add_argument("--industries", type=str, default=None,
                         help="Comma-separated sectors to include (e.g. Technology,Healthcare)")
@@ -60,45 +60,48 @@ def main():
     
     root_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Defaults
+    # Defaults (min_ipo = min_history)
     p_min_hist = 5.0
-    p_min_ipo = 5.0
     p_max_ipo = 10.0
-    p_max_pe = None
+    p_max_pe_by_sector = None  # dict: sector -> max P/E
     p_max_pages = 200
-    
+
+    if args.max_pe_by_sector:
+        try:
+            p_max_pe_by_sector = json.loads(args.max_pe_by_sector)
+            if not isinstance(p_max_pe_by_sector, dict):
+                p_max_pe_by_sector = None
+        except (json.JSONDecodeError, TypeError):
+            p_max_pe_by_sector = None
+
     if args.interactive:
         print("\n--- Pipeline Configuration ---")
         p_min_hist = get_user_input("Minimum History (Years)", 5.0, float)
-        p_min_ipo = get_user_input("Minimum IPO Age (Years)", 5.0, float)
         p_max_ipo = get_user_input("Maximum IPO Age (Years)", 10.0, float)
-        
-        pe_input = input("Maximum P/E Ratio (Enter for None/Disable): ").strip()
+        pe_input = input("Max P/E by Sector (JSON, e.g. {\"Technology\":30,\"Healthcare\":25} or Enter for None): ").strip()
         if pe_input:
-            p_max_pe = float(pe_input)
+            try:
+                p_max_pe_by_sector = json.loads(pe_input)
+                if not isinstance(p_max_pe_by_sector, dict):
+                    p_max_pe_by_sector = None
+            except json.JSONDecodeError:
+                p_max_pe_by_sector = None
         else:
-            p_max_pe = None
-            
+            p_max_pe_by_sector = None
         p_max_pages = get_user_input("Max Pages to Scan", 200, int)
     else:
-        # Use args if provided, else defaults
         if args.min_history is not None: p_min_hist = args.min_history
-        if args.min_ipo is not None: p_min_ipo = args.min_ipo
         if args.max_ipo is not None: p_max_ipo = args.max_ipo
-        if args.max_pe is not None: p_max_pe = args.max_pe
         if args.max_pages is not None: p_max_pages = args.max_pages
 
+    p_min_ipo = p_min_hist  # min IPO age = min history
     # Construct Description
-    pe_desc = f", P/E < {p_max_pe}" if p_max_pe else ""
+    pe_desc = f", P/E by sector {p_max_pe_by_sector}" if p_max_pe_by_sector else ""
     run_description = f"Scan (IPO {p_min_ipo}-{p_max_ipo}y, Hist {p_min_hist}y{pe_desc})"
     
     print(f"\nStarting Pipeline: {run_description}")
     
     # Scripts to run
-    
-    import time
-    import json
-    
     start_time = time.time()
     
     # Save parameters to stats file so downstream modules (like Financial Engine) can see them
@@ -119,10 +122,9 @@ def main():
         "Min_History": p_min_hist,
         "Min_IPO": p_min_ipo,
         "Max_IPO": p_max_ipo,
-        "Max_PE": p_max_pe,
+        "Max_PE_By_Sector": p_max_pe_by_sector,
         "Min_Market_Cap": args.min_market_cap,
         "Min_Price": args.min_price,
-        "Max_Price": args.max_price,
         "NYSE_NASDAQ_Only": not args.no_exchange_filter,
         "Industries": industries_list,
         "Max_Pages": p_max_pages
@@ -156,15 +158,13 @@ def main():
             f"--max-ipo={p_max_ipo}",
             f"--max-pages={p_max_pages}"
         ]
-        if p_max_pe is not None:
-            scraper_args.append(f"--max-pe={p_max_pe}")
+        if p_max_pe_by_sector:
+            scraper_args.append(f"--max-pe-by-sector={json.dumps(p_max_pe_by_sector)}")
 
         if args.min_market_cap is not None:
             scraper_args.append(f"--min-market-cap={args.min_market_cap}")
         if args.min_price is not None:
             scraper_args.append(f"--min-price={args.min_price}")
-        if args.max_price is not None:
-            scraper_args.append(f"--max-price={args.max_price}")
         if args.no_exchange_filter:
             scraper_args.append("--no-exchange-filter")
         if args.industries:
@@ -235,8 +235,8 @@ def main():
                 stats["Total_Time"] = time_str
                 stats["Parameters"] = {
                     "Min_History": p_min_hist, "Min_IPO": p_min_ipo, "Max_IPO": p_max_ipo,
-                    "Max_PE": p_max_pe, "Min_Market_Cap": args.min_market_cap,
-                    "Min_Price": args.min_price, "Max_Price": args.max_price,
+                    "Max_PE_By_Sector": p_max_pe_by_sector, "Min_Market_Cap": args.min_market_cap,
+                    "Min_Price": args.min_price,
                     "NYSE_NASDAQ_Only": not args.no_exchange_filter,
                     "Industries": industries_list, "Max_Pages": p_max_pages
                 }
@@ -249,6 +249,8 @@ def main():
             report_args = [run_description]
             if industries_list:
                 report_args.append(f"--industries={','.join(industries_list)}")
+            if p_max_pe_by_sector:
+                report_args.append(f"--max-pe-by-sector={json.dumps(p_max_pe_by_sector)}")
             if not run_script(script_path, desc, args=report_args):
                 print("Pipeline interrupted.")
                 sys.exit(1)

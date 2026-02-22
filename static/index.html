@@ -8,6 +8,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Stock Analysis Pipeline</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -116,6 +117,32 @@
             margin-bottom: 0;
         }
 
+        .sector-pe-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .sector-pe-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .sector-pe-row label {
+            flex: 1;
+            margin-bottom: 0;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+        .sector-pe-row .sector-pe-input {
+            width: 60px;
+            flex-shrink: 0;
+        }
+        .sector-pe-row .sector-pe-input:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         .checkbox-grid label {
             margin-bottom: 0;
             cursor: pointer;
@@ -162,16 +189,84 @@
 
         #results-area {
             background-color: #0f172a;
-            /* Slightly darker for code */
             font-family: 'Fira Code', 'Consolas', monospace;
             white-space: pre-wrap;
-            overflow-x: auto;
-            max-height: 600px;
-            overflow-y: auto;
-            font-size: 0.9rem;
+            overflow: auto;
+            overflow-wrap: normal;
+            max-height: 70vh;
+            min-height: 300px;
+            font-size: 0.875rem;
             padding: 1rem;
             border-radius: 0.5rem;
             color: #e2e8f0;
+            line-height: 1.5;
+        }
+
+        #results-area.report-mode {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            white-space: normal;
+        }
+
+        #results-area.report-mode h1 {
+            font-size: 1.5rem;
+            margin: 0 0 0.75rem 0;
+            color: #f8fafc;
+        }
+        #results-area.report-mode h2 {
+            font-size: 1.15rem;
+            margin: 1.25rem 0 0.5rem 0;
+            padding-bottom: 0.35rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        #results-area.report-mode h3 {
+            font-size: 1rem;
+            margin: 1rem 0 0.4rem 0;
+            color: #e2e8f0;
+        }
+        #results-area.report-mode p {
+            margin: 0.4rem 0;
+        }
+        #results-area.report-mode hr {
+            border: none;
+            border-top: 1px solid var(--border-color);
+            margin: 1rem 0;
+        }
+
+        #results-area.report-mode table {
+            display: block;
+            width: max-content;
+            min-width: 100%;
+            border-collapse: collapse;
+            margin: 0.75rem 0;
+            font-size: 0.8125rem;
+        }
+        #results-area.report-mode th,
+        #results-area.report-mode td {
+            border: 1px solid var(--border-color);
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+            white-space: nowrap;
+        }
+        #results-area.report-mode th {
+            background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+            color: #f8fafc;
+            font-weight: 600;
+        }
+        #results-area.report-mode td[align="right"],
+        #results-area.report-mode th[align="right"] {
+            text-align: right;
+        }
+        #results-area.report-mode tbody tr:nth-child(even) {
+            background-color: rgba(30, 41, 59, 0.6);
+        }
+        #results-area.report-mode tbody tr:hover {
+            background-color: rgba(51, 65, 85, 0.5);
+        }
+        #results-area.report-mode td {
+            color: #e2e8f0;
+        }
+        #results-area.report-mode strong {
+            color: #f8fafc;
         }
 
         .status-badge {
@@ -218,36 +313,6 @@
             }
         }
 
-        /* Markdown Styling Sim */
-        h2 {
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 0.5rem;
-            margin-top: 1.5rem;
-            color: var(--text-primary);
-        }
-
-        h3 {
-            margin-top: 1.25rem;
-            color: #e2e8f0;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 1rem 0;
-        }
-
-        th,
-        td {
-            border: 1px solid var(--border-color);
-            padding: 0.5rem;
-            text-align: left;
-        }
-
-        th {
-            background-color: var(--bg-color);
-        }
-
         .loading-overlay {
             display: none;
             justify-content: center;
@@ -278,11 +343,6 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="min_ipo">Min IPO Age (Years)</label>
-                        <input type="number" id="min_ipo" value="5.0" step="0.5" min="0">
-                    </div>
-
-                    <div class="form-group">
                         <label for="max_ipo">Max IPO Age (Years)</label>
                         <input type="number" id="max_ipo" value="10.0" step="0.5" min="0">
                     </div>
@@ -293,8 +353,25 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="max_pe">Max P/E Ratio (Optional)</label>
-                        <input type="number" id="max_pe" placeholder="e.g. 25.0" step="0.5" min="0">
+                        <label>Sectors (check to include; set Max P/E per sector — default 40)</label>
+                        <div class="sector-pe-row checkbox-group" style="margin-bottom: 0.5rem;">
+                            <input type="checkbox" id="sectors_select_all">
+                            <label for="sectors_select_all" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Select / Unselect All</label>
+                        </div>
+                        <div class="sector-pe-grid">
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_technology" value="Technology"><label for="sector_technology">Technology</label><input type="number" id="pe_technology" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_financial" value="Financial Services"><label for="sector_financial">Financial Svcs</label><input type="number" id="pe_financial" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_healthcare" value="Healthcare"><label for="sector_healthcare">Healthcare</label><input type="number" id="pe_healthcare" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_consumer_cyclical" value="Consumer Cyclical"><label for="sector_consumer_cyclical">Consumer Cycl.</label><input type="number" id="pe_consumer_cyclical" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_consumer_defensive" value="Consumer Defensive"><label for="sector_consumer_defensive">Consumer Def.</label><input type="number" id="pe_consumer_defensive" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_industrials" value="Industrials"><label for="sector_industrials">Industrials</label><input type="number" id="pe_industrials" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_energy" value="Energy"><label for="sector_energy">Energy</label><input type="number" id="pe_energy" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_utilities" value="Utilities"><label for="sector_utilities">Utilities</label><input type="number" id="pe_utilities" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_real_estate" value="Real Estate"><label for="sector_real_estate">Real Estate</label><input type="number" id="pe_real_estate" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_basic_materials" value="Basic Materials"><label for="sector_basic_materials">Basic Materials</label><input type="number" id="pe_basic_materials" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                            <div class="sector-pe-row"><input type="checkbox" id="sector_communication" value="Communication Services"><label for="sector_communication">Communication</label><input type="number" id="pe_communication" value="40" step="0.5" min="0" class="sector-pe-input"></div>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">Unchecked = all sectors. Checked = filter to those sectors with P/E limit.</div>
                     </div>
 
                     <div class="form-group">
@@ -302,38 +379,9 @@
                         <input type="number" id="min_price" placeholder="e.g. 10" step="0.01" min="0">
                     </div>
 
-                    <div class="form-group">
-                        <label for="max_price">Max Current Price ($) (Optional)</label>
-                        <input type="number" id="max_price" placeholder="e.g. 500" step="0.01" min="0">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="max_pages">Max Search Pages</label>
-                        <input type="number" id="max_pages" value="200" step="1" min="1">
-                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">200 pages ≈
-                            20,000 stocks</div>
-                    </div>
-
                     <div class="form-group checkbox-group">
                         <input type="checkbox" id="nyse_nasdaq_only" checked>
                         <label for="nyse_nasdaq_only" style="margin-bottom: 0; cursor: pointer;">NYSE/NASDAQ Only</label>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Sectors (select to filter — leave all unchecked for all)</label>
-                        <div class="checkbox-grid">
-                            <div class="checkbox-group"><input type="checkbox" id="sector_technology" value="Technology"><label for="sector_technology">Technology</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_financial" value="Financial Services"><label for="sector_financial">Financial Services</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_healthcare" value="Healthcare"><label for="sector_healthcare">Healthcare</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_consumer_cyclical" value="Consumer Cyclical"><label for="sector_consumer_cyclical">Consumer Cyclical</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_consumer_defensive" value="Consumer Defensive"><label for="sector_consumer_defensive">Consumer Defensive</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_industrials" value="Industrials"><label for="sector_industrials">Industrials</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_energy" value="Energy"><label for="sector_energy">Energy</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_utilities" value="Utilities"><label for="sector_utilities">Utilities</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_real_estate" value="Real Estate"><label for="sector_real_estate">Real Estate</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_basic_materials" value="Basic Materials"><label for="sector_basic_materials">Basic Materials</label></div>
-                            <div class="checkbox-group"><input type="checkbox" id="sector_communication" value="Communication Services"><label for="sector_communication">Communication Services</label></div>
-                        </div>
                     </div>
 
                     <div class="form-group checkbox-group">
@@ -372,6 +420,56 @@
 
         let pollInterval = null;
         let isStopping = false;
+
+        const sectorConfig = {
+            "Technology": { cb: "sector_technology", pe: "pe_technology" },
+            "Financial Services": { cb: "sector_financial", pe: "pe_financial" },
+            "Healthcare": { cb: "sector_healthcare", pe: "pe_healthcare" },
+            "Consumer Cyclical": { cb: "sector_consumer_cyclical", pe: "pe_consumer_cyclical" },
+            "Consumer Defensive": { cb: "sector_consumer_defensive", pe: "pe_consumer_defensive" },
+            "Industrials": { cb: "sector_industrials", pe: "pe_industrials" },
+            "Energy": { cb: "sector_energy", pe: "pe_energy" },
+            "Utilities": { cb: "sector_utilities", pe: "pe_utilities" },
+            "Real Estate": { cb: "sector_real_estate", pe: "pe_real_estate" },
+            "Basic Materials": { cb: "sector_basic_materials", pe: "pe_basic_materials" },
+            "Communication Services": { cb: "sector_communication", pe: "pe_communication" }
+        };
+        const sectorNames = Object.keys(sectorConfig);
+
+        function updateSectorPeInputs() {
+            let allChecked = true;
+            sectorNames.forEach(sector => {
+                const { cb, pe } = sectorConfig[sector];
+                const cbEl = document.getElementById(cb);
+                const peEl = document.getElementById(pe);
+                if (cbEl && peEl) {
+                    peEl.disabled = !cbEl.checked;
+                    if (!cbEl.checked) allChecked = false;
+                }
+            });
+            const selectAll = document.getElementById("sectors_select_all");
+            if (selectAll) selectAll.checked = allChecked;
+        }
+
+        function setAllSectors(checked) {
+            sectorNames.forEach(sector => {
+                const cb = document.getElementById(sectorConfig[sector].cb);
+                if (cb) cb.checked = checked;
+            });
+            document.getElementById("sectors_select_all").checked = checked;
+            updateSectorPeInputs();
+        }
+
+        document.getElementById("sectors_select_all").addEventListener("change", function() {
+            setAllSectors(this.checked);
+        });
+
+        sectorNames.forEach(sector => {
+            const cb = document.getElementById(sectorConfig[sector].cb);
+            if (cb) cb.addEventListener("change", updateSectorPeInputs);
+        });
+
+        updateSectorPeInputs();
 
         // Create Stop Button dynamically or toggle Run button?
         // Let's toggle Run button to Stop button when running
@@ -417,32 +515,36 @@
             }
 
             // Clear previous
+            resultsArea.classList.remove('report-mode');
             resultsArea.innerText = "Initializing pipeline...\n";
             isStopping = false;
 
-            // Collect Params - read values at submit time to ensure current form state
-            const maxPeVal = (document.getElementById('max_pe').value || '').trim();
+            // Collect Params - sectors + P/E from combined checkbox+input
+            const industriesChecked = [];
+            const maxPeBySector = {};
+            sectorNames.forEach(sector => {
+                const { cb, pe } = sectorConfig[sector];
+                const cbEl = document.getElementById(cb);
+                const peEl = document.getElementById(pe);
+                if (cbEl && cbEl.checked) {
+                    industriesChecked.push(sector);
+                    const val = (peEl?.value || '').trim();
+                    const peNum = (val && !isNaN(parseFloat(val)) && parseFloat(val) > 0) ? parseFloat(val) : 40;
+                    maxPeBySector[sector] = peNum;
+                }
+            });
             const minMarketCapVal = (document.getElementById('min_market_cap').value || '').trim();
             const minPriceVal = (document.getElementById('min_price').value || '').trim();
-            const maxPriceVal = (document.getElementById('max_price').value || '').trim();
             const minPriceNum = minPriceVal !== '' ? parseFloat(minPriceVal) : NaN;
-            const maxPriceNum = maxPriceVal !== '' ? parseFloat(maxPriceVal) : NaN;
 
-            const industriesChecked = Array.from(document.querySelectorAll('input[id^="sector_"]'))
-                .filter(cb => cb && cb.checked)
-                .map(cb => (cb.value || cb.getAttribute('value') || '').trim())
-                .filter(Boolean);
             const payload = {
                 min_history: parseFloat(document.getElementById('min_history').value),
-                min_ipo: parseFloat(document.getElementById('min_ipo').value),
                 max_ipo: parseFloat(document.getElementById('max_ipo').value),
                 min_market_cap: minMarketCapVal ? parseFloat(minMarketCapVal) : null,
-                max_pe: maxPeVal ? parseFloat(maxPeVal) : null,
+                max_pe_by_sector: Object.keys(maxPeBySector).length > 0 ? maxPeBySector : null,
                 min_price: (!isNaN(minPriceNum) && minPriceNum >= 0) ? minPriceNum : null,
-                max_price: (!isNaN(maxPriceNum) && maxPriceNum >= 0) ? maxPriceNum : null,
                 no_exchange_filter: !document.getElementById('nyse_nasdaq_only').checked,
                 industries: industriesChecked.length > 0 ? industriesChecked : null,
-                max_pages: parseInt(document.getElementById('max_pages').value),
                 skip_scraper: document.getElementById('skip_scraper').checked
             };
 
@@ -478,13 +580,16 @@
                 const data = await resp.json();
 
                 // Update logs in real time (stream progress)
-                const atBottom = resultsArea.scrollTop + resultsArea.clientHeight >= resultsArea.scrollHeight - 80;
-                const newLogs = data.logs || "Waiting for logs...";
-                if (resultsArea.innerText !== newLogs) {
-                    resultsArea.innerText = newLogs;
-                    if (atBottom || data.status === 'running') resultsArea.scrollTop = resultsArea.scrollHeight;
-                } else if (atBottom) {
-                    resultsArea.scrollTop = resultsArea.scrollHeight;
+                if (data.status === 'running') {
+                    resultsArea.classList.remove('report-mode');
+                    const atBottom = resultsArea.scrollTop + resultsArea.clientHeight >= resultsArea.scrollHeight - 80;
+                    const newLogs = data.logs || "Waiting for logs...";
+                    if (resultsArea.innerText !== newLogs) {
+                        resultsArea.innerText = newLogs;
+                        if (atBottom) resultsArea.scrollTop = resultsArea.scrollHeight;
+                    } else if (atBottom) {
+                        resultsArea.scrollTop = resultsArea.scrollHeight;
+                    }
                 }
 
                 // Check Status
@@ -493,14 +598,22 @@
                     setRunningState(false);
                     statusBadge.className = 'status-badge status-success';
                     statusBadge.innerText = 'Complete';
-                    if (data.report) resultsArea.innerText = data.report; // Show report on top? Or just logs? 
-                    // Let's show report if available, else logs
-                    if (data.report) resultsArea.innerText = data.report;
+                    if (data.report) {
+                        resultsArea.classList.add('report-mode');
+                        const html = (typeof marked !== 'undefined' && marked.parse) ? marked.parse(data.report) : (typeof marked === 'function' ? marked(data.report) : data.report.replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+                        resultsArea.innerHTML = html;
+                        resultsArea.scrollTop = 0;
+                        resultsArea.scrollLeft = 0;
+                    }
                 } else if (data.status === 'error' || data.status === 'stopped') {
                     clearInterval(pollInterval);
                     setRunningState(false);
                     statusBadge.className = 'status-badge status-error';
                     statusBadge.innerText = data.status === 'stopped' ? 'Stopped' : 'Error';
+                    if (data.logs) {
+                        resultsArea.classList.remove('report-mode');
+                        resultsArea.innerText = data.logs;
+                    }
                 }
 
             } catch (e) {

@@ -55,8 +55,8 @@ def test_get_waterfall_section_with_price_and_cap(temp_dir):
         "Skipped_Exchange": 0, "Skipped_Industry": 0, "Skipped_PE": 0,
         "Skipped_Market_Cap": 5, "Skipped_Price": 3, "Selected": 90,
         "Parameters": {
-            "Min_History": 5, "Min_IPO": 5, "Max_IPO": 10, "Max_PE": 25,
-            "Min_Market_Cap": 5.0, "Min_Price": 10.0, "Max_Price": 500.0,
+            "Min_History": 5, "Min_IPO": 5, "Max_IPO": 10, "Max_PE_By_Sector": {"Technology": 25},
+            "Min_Market_Cap": 5.0, "Min_Price": 10.0,
             "NYSE_NASDAQ_Only": False, "Industries": ["Technology"], "Max_Pages": 200,
         },
     }
@@ -68,7 +68,7 @@ def test_get_waterfall_section_with_price_and_cap(temp_dir):
                 with patch.object(cr, "FILE_BACKTEST", os.path.join(temp_dir, "x.csv")):
                     result = cr.get_waterfall_section(industries_override=["Technology"])
     assert "Filter: Market Cap" in result
-    assert "Filter: Price" in result
+    assert "Filter: Min Price" in result
     assert "$10-$500" in result or "10" in result
 
 
@@ -88,8 +88,8 @@ def test_run_config_includes_timing(temp_dir):
         "Skipped_Exchange": 0, "Skipped_Industry": 0, "Skipped_PE": 0,
         "Skipped_Market_Cap": 0, "Skipped_Price": 0, "Selected": 95,
         "Parameters": {
-            "Min_History": 5, "Min_IPO": 5, "Max_IPO": 10, "Max_PE": 25,
-            "Min_Market_Cap": None, "Min_Price": None, "Max_Price": None,
+            "Min_History": 5, "Min_IPO": 5, "Max_IPO": 10, "Max_PE_By_Sector": {"Technology": 25},
+            "Min_Market_Cap": None, "Min_Price": None,
             "NYSE_NASDAQ_Only": True, "Industries": None, "Max_Pages": 200,
         },
     }
@@ -151,8 +151,8 @@ def test_generate_markdown_with_optimal_and_backtest(temp_dir):
         "Scanned": 100, "Non_US": 0, "Too_Old": 0, "Too_New": 0, "Errors": 0,
         "Skipped_Exchange": 0, "Skipped_Industry": 0, "Skipped_PE": 0,
         "Skipped_Market_Cap": 0, "Skipped_Price": 0, "Selected": 95,
-        "Parameters": {"Min_History": 5, "Min_IPO": 5, "Max_IPO": 10, "Max_PE": 25,
-            "Min_Market_Cap": None, "Min_Price": None, "Max_Price": None,
+        "Parameters": {"Min_History": 5, "Min_IPO": 5, "Max_IPO": 10, "Max_PE_By_Sector": {"Technology": 25},
+            "Min_Market_Cap": None, "Min_Price": None,
             "NYSE_NASDAQ_Only": True, "Industries": None, "Max_Pages": 200},
     }
     with open(stats_path, "w") as f:
