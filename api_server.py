@@ -38,6 +38,15 @@ state = PipelineState()
 async def read_root():
     return RedirectResponse(url="/static/index.html")
 
+class HoldingItem(BaseModel):
+    symbol: str
+    amount: float
+
+class PortfolioCompareRequest(BaseModel):
+    holdings: List[HoldingItem]
+    start_date: str
+    end_date: str
+
 class AnalyzeRequest(BaseModel):
     min_history: float = 5.0
     max_ipo: float = 10.0
@@ -167,6 +176,22 @@ async def run_analysis(req: AnalyzeRequest):
     t.start()
     
     return {"status": "started", "message": "Pipeline started in background."}
+
+@app.post("/portfolio-compare")
+async def portfolio_compare(req: PortfolioCompareRequest):
+    """
+    Compare a custom portfolio against S&P 500 (SPY) for a given date range.
+    Returns metrics (return, volatility, sharpe, alpha, beta) and time series for charting.
+    """
+    try:
+        import portfolio_compare as pc
+        holdings = [{"symbol": h.symbol, "amount": h.amount} for h in req.holdings]
+        result = pc.run_portfolio_compare(holdings, req.start_date, req.end_date)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 @app.get("/status")
 def get_status():

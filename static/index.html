@@ -9,6 +9,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Stock Analysis Pipeline</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -320,6 +321,79 @@
             margin-top: 1rem;
             color: var(--text-secondary);
         }
+
+        .tab-bar {
+            display: flex;
+            gap: 0;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .tab-btn {
+            padding: 0.75rem 1.5rem;
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            width: auto;
+        }
+        .tab-btn:hover {
+            color: var(--text-primary);
+        }
+        .tab-btn.active {
+            color: var(--accent-color);
+            border-bottom-color: var(--accent-color);
+        }
+        .tab-panel {
+            display: none;
+        }
+        .tab-panel.active {
+            display: block;
+        }
+        .holding-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .holding-row input[type="text"] { flex: 1; min-width: 80px; }
+        .holding-row input[type="number"] { width: 100px; flex-shrink: 0; }
+        .holding-row button.remove-btn {
+            width: auto;
+            padding: 0.5rem 0.75rem;
+            background: var(--border-color);
+            font-size: 0.875rem;
+        }
+        .holding-row button.remove-btn:hover {
+            background: var(--error-color);
+        }
+        #portfolio-chart-container {
+            height: 280px;
+            margin-top: 1rem;
+        }
+        .compare-metrics-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+        .compare-metrics-table th,
+        .compare-metrics-table td {
+            border: 1px solid var(--border-color);
+            padding: 0.5rem 0.75rem;
+            text-align: right;
+        }
+        .compare-metrics-table th {
+            background: #334155;
+            color: #f8fafc;
+            font-weight: 600;
+        }
+        .compare-metrics-table th:first-child,
+        .compare-metrics-table td:first-child {
+            text-align: left;
+        }
     </style>
 </head>
 
@@ -331,6 +405,12 @@
             <p class="subtitle">Configure and run the full stock analysis engine.</p>
         </header>
 
+        <div class="tab-bar">
+            <button type="button" class="tab-btn active" data-tab="pipeline">Pipeline</button>
+            <button type="button" class="tab-btn" data-tab="portfolio-compare">Portfolio Compare</button>
+        </div>
+
+        <div id="tab-pipeline" class="tab-panel active">
         <div class="grid">
             <!-- Configuration Panel -->
             <div class="card">
@@ -406,6 +486,52 @@
 
                 <div id="results-area">
                     Results will appear here...
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <div id="tab-portfolio-compare" class="tab-panel">
+            <div class="grid">
+                <div class="card">
+                    <h2 style="margin-top:0">Portfolio Input</h2>
+                    <form id="portfolio-compare-form">
+                        <div class="form-group">
+                            <label for="pc-start-date">Start Date</label>
+                            <input type="date" id="pc-start-date" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="pc-end-date">End Date</label>
+                            <input type="date" id="pc-end-date" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Holdings (Symbol and $ Invested)</label>
+                            <div id="holdings-container">
+                                <div class="holding-row">
+                                    <input type="text" placeholder="e.g. AAPL" class="holding-symbol">
+                                    <input type="number" placeholder="1000" min="0.01" step="0.01" class="holding-amount">
+                                    <button type="button" class="remove-btn">Remove</button>
+                                </div>
+                            </div>
+                            <button type="button" id="add-holding-btn" style="width:auto; margin-top:0.5rem;">Add Stock</button>
+                        </div>
+                        <button type="submit" id="compare-btn">Compare</button>
+                        <div id="pc-loading" class="loading-overlay">
+                            <span>Calculating...</span>
+                        </div>
+                    </form>
+                </div>
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h2 style="margin:0">Portfolio vs S&P 500</h2>
+                        <span id="pc-status-badge" class="status-badge status-idle">Ready</span>
+                    </div>
+                    <div id="portfolio-results-area">
+                        <p style="color: var(--text-secondary);">Enter holdings and date range, then click Compare.</p>
+                    </div>
+                    <div id="portfolio-chart-container" style="display:none;">
+                        <canvas id="portfolio-chart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
@@ -620,6 +746,197 @@
                 console.error("Poll error:", e);
             }
         }
+
+        // --- Tab switching ---
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                const tabId = 'tab-' + btn.dataset.tab;
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
+
+        // --- Portfolio Compare ---
+        const pcForm = document.getElementById('portfolio-compare-form');
+        const pcResults = document.getElementById('portfolio-results-area');
+        const pcStatusBadge = document.getElementById('pc-status-badge');
+        const pcLoading = document.getElementById('pc-loading');
+        const compareBtn = document.getElementById('compare-btn');
+        const holdingsContainer = document.getElementById('holdings-container');
+        const addHoldingBtn = document.getElementById('add-holding-btn');
+        const pcChartContainer = document.getElementById('portfolio-chart-container');
+
+        // Default dates: 1 year ago to today
+        const today = new Date().toISOString().slice(0, 10);
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+        const oneYearStr = oneYearAgo.toISOString().slice(0, 10);
+        document.getElementById('pc-start-date').value = oneYearStr;
+        document.getElementById('pc-end-date').value = today;
+
+        function addHoldingRow() {
+            const row = document.createElement('div');
+            row.className = 'holding-row';
+            row.innerHTML = '<input type="text" placeholder="e.g. AAPL" class="holding-symbol">' +
+                '<input type="number" placeholder="1000" min="0.01" step="0.01" class="holding-amount">' +
+                '<button type="button" class="remove-btn">Remove</button>';
+            row.querySelector('.remove-btn').addEventListener('click', () => {
+                if (holdingsContainer.querySelectorAll('.holding-row').length > 1) row.remove();
+            });
+            holdingsContainer.appendChild(row);
+        }
+        addHoldingBtn.addEventListener('click', addHoldingRow);
+        document.querySelectorAll('#holdings-container .remove-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const row = this.closest('.holding-row');
+                if (holdingsContainer.querySelectorAll('.holding-row').length > 1) row.remove();
+            });
+        });
+
+        let portfolioChart = null;
+
+        pcForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const rows = holdingsContainer.querySelectorAll('.holding-row');
+            const holdings = [];
+            for (const row of rows) {
+                const sym = row.querySelector('.holding-symbol').value.trim().toUpperCase();
+                const amt = parseFloat(row.querySelector('.holding-amount').value);
+                if (sym && amt > 0) holdings.push({ symbol: sym, amount: amt });
+            }
+            const startDate = document.getElementById('pc-start-date').value;
+            const endDate = document.getElementById('pc-end-date').value;
+            if (!holdings.length) {
+                pcStatusBadge.className = 'status-badge status-error';
+                pcStatusBadge.innerText = 'Error';
+                pcResults.innerHTML = '<p style="color: var(--error-color);">Add at least one holding with a symbol and positive amount.</p>';
+                return;
+            }
+            if (startDate >= endDate) {
+                pcStatusBadge.className = 'status-badge status-error';
+                pcStatusBadge.innerText = 'Error';
+                pcResults.innerHTML = '<p style="color: var(--error-color);">Start date must be before end date.</p>';
+                return;
+            }
+            compareBtn.disabled = true;
+            pcLoading.style.display = 'flex';
+            pcStatusBadge.className = 'status-badge status-running';
+            pcStatusBadge.innerText = 'Running';
+            pcResults.innerHTML = 'Calculating metrics...';
+            pcChartContainer.style.display = 'none';
+            if (portfolioChart) { portfolioChart.destroy(); portfolioChart = null; }
+
+            try {
+                const resp = await fetch('/portfolio-compare', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ holdings, start_date: startDate, end_date: endDate })
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    throw new Error(data.detail || resp.statusText || 'Request failed');
+                }
+                pcStatusBadge.className = 'status-badge status-success';
+                pcStatusBadge.innerText = 'Complete';
+
+                const fmt = (v, pct) => (v == null || v === undefined) ? 'N/A' : (pct ? (v * 100).toFixed(2) + '%' : (typeof v === 'number' ? v.toFixed(2) : v));
+                const p = data.portfolio || {};
+                const spy = data.spy || {};
+                const p3yByYear = data.portfolio_3y_by_year || {};
+                const optW = data.optimal_weights || {};
+                const optP = data.optimal_portfolio || {};
+                const optP3yByYear = data.optimal_portfolio_3y_by_year || {};
+
+                const years = ['2023', '2024', '2025'];
+                const yearCols = years.filter(y => y in p3yByYear || y in optP3yByYear);
+                if (yearCols.length === 0) yearCols.push(...years);
+
+                let html = '<h3 style="margin:0 0 0.5rem 0; font-size:1rem;">Your Portfolio vs S&P 500 (selected period)</h3>';
+                html += '<table class="compare-metrics-table"><thead><tr><th></th><th>Portfolio</th><th>S&P 500 (SPY)</th></tr></thead><tbody>';
+                html += '<tr><td>Return</td><td>' + fmt(p.return ?? 0, true) + '</td><td>' + fmt(spy.return ?? 0, true) + '</td></tr>';
+                html += '<tr><td>Volatility</td><td>' + fmt(p.volatility ?? 0, true) + '</td><td>' + fmt(spy.volatility ?? 0, true) + '</td></tr>';
+                html += '<tr><td>Sharpe Ratio</td><td>' + fmt(p.sharpe ?? 0, false) + '</td><td>—</td></tr>';
+                html += '<tr><td>Alpha</td><td>' + fmt(p.alpha ?? 0, true) + '</td><td>—</td></tr>';
+                html += '<tr><td>Beta</td><td>' + fmt(p.beta ?? 0, false) + '</td><td>—</td></tr>';
+                html += '</tbody></table>';
+
+                html += '<h3 style="margin:1.25rem 0 0.5rem 0; font-size:1rem;">Last 3 Years Return (IPO-adjusted)</h3>';
+                html += '<p style="margin:0 0 0.5rem; color: var(--text-secondary); font-size:0.9rem;">Stocks without trading history in a year: allocation treated as zero for those days.</p>';
+                html += '<table class="compare-metrics-table"><thead><tr><th></th>';
+                yearCols.forEach(y => { html += '<th>' + y + '</th>'; });
+                html += '</tr></thead><tbody>';
+                html += '<tr><td>Return</td>'; yearCols.forEach(y => { html += '<td>' + fmt((p3yByYear[y] || {}).return, true) + '</td>'; }); html += '</tr>';
+                html += '<tr><td>Volatility</td>'; yearCols.forEach(y => { html += '<td>' + fmt((p3yByYear[y] || {}).volatility, true) + '</td>'; }); html += '</tr>';
+                html += '<tr><td>Sharpe Ratio</td>'; yearCols.forEach(y => { html += '<td>' + fmt((p3yByYear[y] || {}).sharpe, false) + '</td>'; }); html += '</tr>';
+                html += '<tr><td>Alpha</td>'; yearCols.forEach(y => { html += '<td>' + fmt((p3yByYear[y] || {}).alpha, true) + '</td>'; }); html += '</tr>';
+                html += '<tr><td>Beta</td>'; yearCols.forEach(y => { html += '<td>' + fmt((p3yByYear[y] || {}).beta, false) + '</td>'; }); html += '</tr>';
+                html += '</tbody></table>';
+
+                html += '<h3 style="margin:1.25rem 0 0.5rem 0; font-size:1rem;">Optimal Allocation (Max Sharpe)</h3>';
+                html += '<p style="margin:0 0 0.5rem; color: var(--text-secondary); font-size:0.9rem;">Mean-variance optimization for maximum Sharpe ratio over the selected period.</p>';
+                html += '<table class="compare-metrics-table"><thead><tr><th>Symbol</th><th>Weight</th></tr></thead><tbody>';
+                const optKeys = Object.keys(optW);
+                if (optKeys.length > 0) {
+                    optKeys.forEach(sym => { html += '<tr><td>' + sym + '</td><td>' + fmt(optW[sym], true) + '</td></tr>'; });
+                } else {
+                    html += '<tr><td colspan="2">Optimization did not converge.</td></tr>';
+                }
+                html += '</tbody></table>';
+
+                html += '<h3 style="margin:1.25rem 0 0.5rem 0; font-size:1rem;">Optimal Portfolio Metrics</h3>';
+                html += '<table class="compare-metrics-table"><thead><tr><th></th><th>Selected Period</th>';
+                yearCols.forEach(y => { html += '<th>' + y + '</th>'; });
+                html += '</tr></thead><tbody>';
+                html += '<tr><td>Return</td><td>' + fmt(optP.return, true) + '</td>';
+                yearCols.forEach(y => { html += '<td>' + fmt((optP3yByYear[y] || {}).return, true) + '</td>'; }); html += '</tr>';
+                html += '<tr><td>Volatility</td><td>' + fmt(optP.volatility, true) + '</td>';
+                yearCols.forEach(y => { html += '<td>' + fmt((optP3yByYear[y] || {}).volatility, true) + '</td>'; }); html += '</tr>';
+                html += '<tr><td>Sharpe Ratio</td><td>' + fmt(optP.sharpe, false) + '</td>';
+                yearCols.forEach(y => { html += '<td>' + fmt((optP3yByYear[y] || {}).sharpe, false) + '</td>'; }); html += '</tr>';
+                html += '<tr><td>Alpha</td><td>' + fmt(optP.alpha, true) + '</td>';
+                yearCols.forEach(y => { html += '<td>' + fmt((optP3yByYear[y] || {}).alpha, true) + '</td>'; }); html += '</tr>';
+                html += '<tr><td>Beta</td><td>' + fmt(optP.beta, false) + '</td>';
+                yearCols.forEach(y => { html += '<td>' + fmt((optP3yByYear[y] || {}).beta, false) + '</td>'; }); html += '</tr>';
+                html += '</tbody></table>';
+
+                pcResults.innerHTML = html;
+
+                const series = data.series || [];
+                if (series.length > 0) {
+                    pcChartContainer.style.display = 'block';
+                    const ctx = document.getElementById('portfolio-chart').getContext('2d');
+                    if (portfolioChart) portfolioChart.destroy();
+                    portfolioChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: series.map(s => s.date),
+                            datasets: [
+                                { label: 'Portfolio', data: series.map(s => s.portfolio_cum), borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.1)', fill: true, tension: 0.1 },
+                                { label: 'S&P 500 (SPY)', data: series.map(s => s.spy_cum), borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.1)', fill: true, tension: 0.1 }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { labels: { color: '#94a3b8' } } },
+                            scales: {
+                                x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 } },
+                                y: { ticks: { color: '#94a3b8' }, title: { display: true, text: 'Cumulative return (start = 1)', color: '#94a3b8' } }
+                            }
+                        }
+                    });
+                }
+            } catch (err) {
+                pcStatusBadge.className = 'status-badge status-error';
+                pcStatusBadge.innerText = 'Error';
+                pcResults.innerHTML = '<p style="color: var(--error-color);">' + (err.message || 'Request failed') + '</p>';
+            } finally {
+                compareBtn.disabled = false;
+                pcLoading.style.display = 'none';
+            }
+        });
     </script>
 
 </body>
