@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements-cloud.txt
 COPY config.py .
 COPY api_server.py .
 COPY run_pipeline.py .
+COPY portfolio_compare.py .
 COPY static/ ./static/
 COPY stock_agent/ ./stock_agent/
 COPY financial_engine/ ./financial_engine/
