@@ -2,13 +2,35 @@
 # Usage: gcloud builds submit --config=cloudbuild.yaml
 
 steps:
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Verifying static/index.html contains new UI..."
+        if ! grep -q "Portfolio Compare" static/index.html; then
+          echo "ERROR: static/index.html missing 'Portfolio Compare' - wrong or stale file"
+          exit 1
+        fi
+        if ! grep -q "sector-pe-grid" static/index.html; then
+          echo "ERROR: static/index.html missing sector P/E filter - wrong or stale file"
+          exit 1
+        fi
+        echo "Static files verified OK"
+
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '--no-cache'
       - '-t'
+      - 'gcr.io/$PROJECT_ID/stock-analysis-api:$BUILD_ID'
+      - '-t'
       - 'gcr.io/$PROJECT_ID/stock-analysis-api:latest'
       - '.'
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/stock-analysis-api:$BUILD_ID'
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
@@ -20,7 +42,7 @@ steps:
       - 'deploy'
       - 'stock-analysis-api'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/stock-analysis-api:latest'
+      - 'gcr.io/$PROJECT_ID/stock-analysis-api:$BUILD_ID'
       - '--region'
       - 'us-central1'
       - '--platform'
@@ -38,6 +60,7 @@ steps:
       - '3'
 
 images:
+  - 'gcr.io/$PROJECT_ID/stock-analysis-api:$BUILD_ID'
   - 'gcr.io/$PROJECT_ID/stock-analysis-api:latest'
 
 options:

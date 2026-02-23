@@ -53,3 +53,27 @@ On **pull request**:
 pytest tests/ -v --tb=short --cov=. --cov-fail-under=25
 pip-audit
 ```
+
+---
+
+## 5. Troubleshooting: Old UI After Deploy
+
+If the Cloud Run URL still shows the old interface (no tabs, no sector P/E filter):
+
+1. **Use the correct project and URL**  
+   GitHub Actions deploys to project `stock-analysis-20250219`.  
+   - Go to [Cloud Run](https://console.cloud.google.com/run) and ensure **project = stock-analysis-20250219**.
+   - Open the `stock-analysis-api` service and copy its URL.
+   - The URL format is `https://stock-analysis-api-[PROJECT_NUMBER].us-central1.run.app`.
+
+2. **Remove other Cloud Build triggers**  
+   If you have a Cloud Build trigger linked to this repo, disable it or set it to use the same `cloudbuild.yaml` so it doesn’t deploy an older config.
+
+3. **Trigger a fresh deploy**  
+   Push a small commit. The pipeline will:
+   - Verify that `static/index.html` includes "Portfolio Compare" and sector P/E elements.
+   - Build the image with `--no-cache`.
+   - Deploy the new image to Cloud Run.
+
+4. **Bypass browser cache**  
+   After deploy, hard refresh (Ctrl+Shift+R) or open the URL in an incognito/private window.
