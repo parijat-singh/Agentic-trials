@@ -58,6 +58,70 @@ class AnalyzeRequest(BaseModel):
     max_pages: int = 200
     skip_scraper: bool = False
 
+
+class ETFAnalyzeRequest(BaseModel):
+    max_expense_ratio: float = 0.005
+    min_aum: float = 1e9
+    min_history_years: float = 3.0
+    nyse_nasdaq_only: bool = True
+    skip_scraper: bool = False
+    skip_fetcher: bool = False
+
+
+etf_sessions: Dict[str, Dict] = {}
+
+
+def run_etf_pipeline_background(session_id: str, req: ETFAnalyzeRequest):
+    import config
+    etf_sessions[session_id] = {"status": "running", "logs": [], "report_path": None}
+    cwd = os.path.dirname(os.path.abspath(__file__))
+    session_dir = os.path.join(config.ETF_SESSIONS_DIR, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+    log_file_path = os.path.join(session_dir, "pipeline.log")
+    cmd = [sys.executable, "-u", "run_etf_pipeline.py", f"--session-id={session_id}",
+           f"--max-expense-ratio={req.max_expense_ratio*100}", f"--min-aum={req.min_aum}",
+           f"--min-history-years={req.min_history_years}", "--max-pages=40"]
+    if not req.nyse_nasdaq_only:
+        cmd.append("--no-nyse-nasdaq")
+    if req.skip_scraper:
+        cmd.append("--skip-scraper")
+    if req.skip_fetcher:
+        cmd.append("--skip-fetcher")
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
+    def run():
+        try:
+            with open(log_file_path, "w", encoding="utf-8") as log_file:
+                log_file.write(f"--- ETF Pipeline started {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+                log_file.write(f"Command: {' '.join(cmd)}\n\n")
+                log_file.flush()
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, cwd=cwd, bufsize=1, env=env,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0)
+                for line in iter(p.stdout.readline, ""):
+                    if line:
+                        etf_sessions[session_id]["logs"].append(line)
+                        log_file.write(line)
+                        log_file.flush()
+                p.stdout.close()
+                rc = p.wait()
+                etf_sessions[session_id]["status"] = "completed" if rc == 0 else "error"
+                etf_sessions[session_id]["report_path"] = os.path.join(config.ETF_SESSIONS_DIR, session_id, "ETF_REPORT.md")
+                log_file.write(f"\n--- Exit code: {rc} ---\n")
+        except Exception as e:
+            etf_sessions[session_id]["status"] = "error"
+            err_msg = f"\n[API] Error: {str(e)}\n"
+            etf_sessions[session_id]["logs"].append(err_msg)
+            try:
+                with open(log_file_path, "a", encoding="utf-8") as log_file:
+                    log_file.write(err_msg)
+            except Exception:
+                pass
+
+    threading.Thread(target=run).start()
+
+
 def run_pipeline_background(cmd, cwd):
     """
     Runs the pipeline in background, captures output, and updates state.
@@ -214,6 +278,38 @@ def get_status():
         "logs": "".join(state.logs),
         "report": report_content
     }
+
+@app.post("/etf-analyze")
+async def run_etf_analysis(req: ETFAnalyzeRequest):
+    import uuid
+    session_id = str(uuid.uuid4())[:8]
+    run_etf_pipeline_background(session_id, req)
+    return {"status": "started", "session_id": session_id}
+
+
+@app.get("/etf-status/{session_id}")
+def get_etf_status(session_id: str):
+    if session_id not in etf_sessions:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    s = etf_sessions[session_id]
+    report_content = None
+    if s["status"] == "completed" and s.get("report_path") and os.path.exists(s["report_path"]):
+        with open(s["report_path"], "r") as f:
+            report_content = f.read()
+    log_path = os.path.join(config.ETF_SESSIONS_DIR, session_id, "pipeline.log")
+    return {"status": s["status"], "logs": "".join(s["logs"]), "report": report_content, "log_file": log_path}
+
+
+@app.get("/etf-log/{session_id}")
+def get_etf_log(session_id: str):
+    """Return pipeline.log content for a session (for investigation)."""
+    import config
+    log_path = os.path.join(config.ETF_SESSIONS_DIR, session_id, "pipeline.log")
+    if not os.path.exists(log_path):
+        raise HTTPException(status_code=404, detail=f"Log not found for session {session_id}")
+    with open(log_path, "r", encoding="utf-8") as f:
+        return {"session_id": session_id, "log": f.read()}
+
 
 @app.post("/stop")
 def stop_process():

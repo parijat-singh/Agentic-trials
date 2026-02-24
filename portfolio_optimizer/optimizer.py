@@ -3,6 +3,24 @@ import numpy as np
 from scipy.optimize import minimize
 import os
 
+
+def load_data_from_db(symbols, db):
+    """Load historical Close prices for symbols from ETFDB. Returns DataFrame with symbols as columns."""
+    price_data = {}
+    for sym in symbols:
+        df = db.load_history(sym)
+        if df.empty or "Close" not in df.columns:
+            continue
+        price_data[sym] = df["Close"]
+    if not price_data:
+        return pd.DataFrame()
+    prices_df = pd.DataFrame(price_data)
+    prices_df = prices_df.ffill().dropna()
+    if prices_df.empty:
+        prices_df = pd.DataFrame(price_data).ffill().tail(252).dropna()
+    return prices_df
+
+
 def load_data(top_50_file, data_dir):
     """
     Loads historical adjusted close prices for the top 50 stocks.

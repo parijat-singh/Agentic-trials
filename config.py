@@ -30,3 +30,17 @@ else:
     # DB stays on C: (already set above) - avoids OneDrive sync issues
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
+
+# ETF storage: cloud/G Drive for local; /tmp for Cloud Run
+if os.environ.get("ETF_STORAGE_ROOT"):
+    ETF_STORAGE_ROOT = os.environ["ETF_STORAGE_ROOT"]
+elif os.path.exists(r"G:\My Drive\Agentic-trials-data"):
+    ETF_STORAGE_ROOT = os.path.join(r"G:\My Drive\Agentic-trials-data", "etf_data")
+else:
+    ETF_STORAGE_ROOT = os.path.join(DATA_DIR, "etf_data")
+ETF_CACHE_DB = os.path.join(ETF_STORAGE_ROOT, "etf", "etf_cache.db")
+ETF_SESSIONS_DIR = os.path.join(ETF_STORAGE_ROOT, "sessions")
+ETF_ARCHIVE_DIR = os.path.join(ETF_STORAGE_ROOT, "reports_archive")
+os.makedirs(os.path.dirname(ETF_CACHE_DB), exist_ok=True)
+os.makedirs(ETF_SESSIONS_DIR, exist_ok=True)
+os.makedirs(ETF_ARCHIVE_DIR, exist_ok=True)
