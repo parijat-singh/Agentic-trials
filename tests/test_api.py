@@ -59,3 +59,33 @@ def test_analyze_with_min_price_and_industries():
     ind_arg = [a for a in cmd if a.startswith("--industries=")]
     assert len(ind_arg) == 1
     assert "Technology" in ind_arg[0] and "Energy" in ind_arg[0]
+
+
+def test_etf_analyze_post():
+    """POST /etf-analyze starts pipeline and returns session_id."""
+    from unittest.mock import patch
+    with patch("api_server.run_etf_pipeline_background"):
+        response = client.post("/etf-analyze", json={
+            "max_expense_ratio": 0.005,
+            "min_aum": 1e9,
+            "min_history_years": 3.0,
+            "nyse_nasdaq_only": True,
+            "skip_scraper": False,
+            "skip_fetcher": False,
+        })
+    assert response.status_code == 200
+    data = response.json()
+    assert "session_id" in data
+    assert "status" in data
+
+
+def test_etf_status_404():
+    """GET /etf-status/{id} returns 404 for unknown session."""
+    response = client.get("/etf-status/nonexistent-id-99")
+    assert response.status_code == 404
+
+
+def test_etf_log_404():
+    """GET /etf-log/{id} returns 404 when log file does not exist."""
+    response = client.get("/etf-log/nonexistent-id-99")
+    assert response.status_code == 404

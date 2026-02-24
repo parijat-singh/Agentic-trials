@@ -11,7 +11,7 @@ if __name__ == "__main__":
             sys.executable, "-m", "pytest", "tests/",
             "-v", "--tb=short",
             "--cov=.", "--cov-report=term-missing",
-            "--cov-fail-under=30",
+            "--cov-fail-under=70",
         ],
         cwd=root,
     )

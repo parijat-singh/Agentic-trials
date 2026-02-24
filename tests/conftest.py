@@ -79,3 +79,28 @@ def mock_config(monkeypatch, temp_dir):
     monkeypatch.setattr("config.ARCHIVE_DIR", archive_dir)
     monkeypatch.setattr("config.DB_PATH", db_path)
     return {"DATA_DIR": data_dir, "ARCHIVE_DIR": archive_dir, "DB_PATH": db_path}
+
+
+@pytest.fixture
+def mock_etf_config(monkeypatch, temp_dir):
+    """Override ETF config paths for ETF module tests."""
+    etf_root = os.path.join(temp_dir, "etf_data")
+    etf_dir = os.path.join(etf_root, "etf")
+    sessions_dir = os.path.join(etf_root, "sessions")
+    archive_dir = os.path.join(etf_root, "reports_archive")
+    db_path = os.path.join(etf_dir, "etf_cache.db")
+    os.makedirs(etf_dir, exist_ok=True)
+    os.makedirs(sessions_dir, exist_ok=True)
+    os.makedirs(archive_dir, exist_ok=True)
+    monkeypatch.setattr("config.ETF_STORAGE_ROOT", etf_root)
+    monkeypatch.setattr("config.ETF_CACHE_DB", db_path)
+    monkeypatch.setattr("config.ETF_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr("config.ETF_ARCHIVE_DIR", archive_dir)
+    return {"ETF_STORAGE_ROOT": etf_root, "ETF_CACHE_DB": db_path, "ETF_SESSIONS_DIR": sessions_dir, "ETF_ARCHIVE_DIR": archive_dir}
+
+
+@pytest.fixture
+def temp_etf_db(mock_etf_config):
+    """Provide a temp ETFDB instance using mock_etf_config."""
+    from etf_agent.etf_db import ETFDB
+    return ETFDB(db_path=mock_etf_config["ETF_CACHE_DB"])
