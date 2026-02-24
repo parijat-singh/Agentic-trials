@@ -175,11 +175,21 @@ def main():
              sys.exit(1)
 
     # 1.5 Industry filter on top_100_new_stocks.csv (critical when skip_scraper: reuses old CSV)
+    import pandas as pd
+    csv_path = os.path.join(config.DATA_DIR, "top_100_new_stocks.csv")
+    if not os.path.exists(csv_path):
+        print("Error: top_100_new_stocks.csv not found. Run the scraper first.")
+        sys.exit(1)
+    try:
+        df = pd.read_csv(csv_path)
+    except pd.errors.EmptyDataError:
+        print("Error: No stocks passed the filters. Please relax criteria (sectors, P/E, market cap, exchange) and try again.")
+        sys.exit(1)
+    if df.empty:
+        print("Error: No stocks passed the filters. Please relax criteria (sectors, P/E, market cap, exchange) and try again.")
+        sys.exit(1)
+
     if industries_list:
-        import pandas as pd
-        csv_path = os.path.join(config.DATA_DIR, "top_100_new_stocks.csv")
-        if os.path.exists(csv_path):
-            df = pd.read_csv(csv_path)
             sector_col = 'sector' if 'sector' in df.columns else ('Sector' if 'Sector' in df.columns else None)
             # Enrich sector from DB if column missing
             if sector_col is None or (sector_col in df.columns and df[sector_col].isna().all()):
@@ -201,6 +211,10 @@ def main():
                 print(f"Industry filter: {before} -> {len(df)} stocks (sectors: {', '.join(industries_list)})")
             else:
                 print("Warning: top_100_new_stocks.csv has no sector column; cannot filter by industry.")
+
+    if df.empty:
+        print("Error: No stocks passed the filters. Please relax criteria (sectors, P/E, market cap, exchange) and try again.")
+        sys.exit(1)
 
     # 2. Other Modules
     scripts = [

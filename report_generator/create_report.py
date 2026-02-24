@@ -24,6 +24,18 @@ LOG_FILE = os.path.join(ROOT_DIR, "REPORT_LOG.md")
 
 import json
 
+def _df_to_markdown(df, index=False):
+    """Convert DataFrame to markdown table. Fallback if tabulate is missing."""
+    if df is None or df.empty:
+        return ""
+    try:
+        return df.to_markdown(index=index)
+    except ImportError:
+        # Fallback: build markdown table manually when tabulate is not installed
+        csv_str = df.to_csv(index=index, sep='|')
+        lines = [f"|{line}|" for line in csv_str.strip().split('\n')]
+        return '\n'.join(lines)
+
 def get_waterfall_section(industries_override=None, max_pe_by_sector_override=None):
     """industries_override: list of sector names from --industries CLI (overrides stats when set)
     max_pe_by_sector_override: dict from --max-pe-by-sector CLI (overrides stats when set)"""
@@ -156,7 +168,7 @@ def get_price_data(symbols, valid_start_date="2023-01-01"):
                         ticker = yf.Ticker("SPY")
                         hist = ticker.history(period="10y")
                         # Normalize to date only to align with other stocks
-                        hist.index = pd.to_datetime(hist.index, utc=True).tz_convert('US/Eastern').tz_localize(None).normalize()
+                        hist.index = pd.to_datetime(hist.index, utc=True).tz_localize(None).normalize()
                         data[symbol] = hist['Close']
                     except Exception as e:
                         print(f"Error fetching SPY data: {e}", flush=True)
@@ -472,14 +484,28 @@ def generate_markdown(criteria_description="Default Run", industries_override=No
             with open(top_10_file, 'r') as f:
                 data = json.load(f)
             
-            report_content += "## Top 10 Market Cap Companies Analysis\n"
-            report_content += "**Why they are (or are not) in the portfolio:**\n\n"
-            report_content += "| Rank | Symbol | Name | Status/Reason |\n"
-            report_content += "|:---:|:---:|:---|:---|\n"
-            
-            for item in data:
-                report_content += f"| {item['Rank']} | {item['Symbol']} | {item['Name']} | {item['Reason']} |\n"
-            
+            report_content += "## Top 10 by Market Cap per Sector\n"
+            report_content += "**Why each was or was not included in the final portfolio.**\n\n"
+
+            if isinstance(data, dict) and "per_sector" in data:
+                per_sector = data["per_sector"]
+                for sector_name, items in per_sector.items():
+                    if not items:
+                        continue
+                    report_content += f"### Top 10 by Market Cap: {sector_name}\n\n"
+                    report_content += "| Rank | Symbol | Name | Status/Reason |\n"
+                    report_content += "|:---:|:---:|:---|:---|\n"
+                    for item in items:
+                        report_content += f"| {item['Rank']} | {item['Symbol']} | {item['Name']} | {item['Reason']} |\n"
+                    report_content += "\n"
+            else:
+                items = data.get("legacy", data) if isinstance(data, dict) else data
+                if isinstance(items, list):
+                    report_content += "| Rank | Symbol | Name | Status/Reason |\n"
+                    report_content += "|:---:|:---:|:---|:---|\n"
+                    for item in items:
+                        report_content += f"| {item['Rank']} | {item['Symbol']} | {item['Name']} | {item['Reason']} |\n"
+
             report_content += "\n---\n\n"
         except Exception as e:
             print(f"Error adding Top 10 section: {e}")
@@ -506,7 +532,7 @@ def generate_markdown(criteria_description="Default Run", industries_override=No
                 
                 report_content += f"- **Top Stock:** {top_sym} (Sharpe: {top_sharpe:.2f})\n\n"
                 report_content += "**Top 10 Ranked Stocks:**\n\n"
-                report_content += df.head(10).to_markdown(index=False) + "\n\n"
+                report_content += _df_to_markdown(df.head(10), index=False) + "\n\n"
         except Exception as e:
              report_content += f"Error reading Top 50 file: {e}\n\n"
     else:
@@ -555,9 +581,9 @@ def generate_markdown(criteria_description="Default Run", industries_override=No
         # Check if they exist (in case df was empty or old CSV)
         cols_to_show = [c for c in cols_to_show if c in df.columns]
         if cols_to_show:
-            report_content += df[cols_to_show].rename(columns={'Weight_Fmt': 'Weight'}).to_markdown(index=False) + "\n\n"
+            report_content += _df_to_markdown(df[cols_to_show].rename(columns={'Weight_Fmt': 'Weight'}), index=False) + "\n\n"
         else:
-            report_content += df.to_markdown(index=False) + "\n\n" if not df.empty else ""
+            report_content += _df_to_markdown(df, index=False) + "\n\n" if not df.empty else ""
         
         # Yearly Analysis
         report_content += "### Yearly Performance Analysis\n"
@@ -584,9 +610,9 @@ def generate_markdown(criteria_description="Default Run", industries_override=No
         cols_to_show = ['Symbol', 'Weight_Fmt', 'P/E', 'PEG', 'P/B']
         cols_to_show = [c for c in cols_to_show if c in df.columns]
         if cols_to_show:
-            report_content += df[cols_to_show].rename(columns={'Weight_Fmt': 'Weight'}).to_markdown(index=False) + "\n\n"
+            report_content += _df_to_markdown(df[cols_to_show].rename(columns={'Weight_Fmt': 'Weight'}), index=False) + "\n\n"
         else:
-            report_content += df.to_markdown(index=False) + "\n\n" if not df.empty else ""
+            report_content += _df_to_markdown(df, index=False) + "\n\n" if not df.empty else ""
         
         # Yearly Analysis
         report_content += "### Yearly Performance Analysis\n"

@@ -6,6 +6,7 @@ WORKDIR /app
 # Install system deps for building some Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements - use cloud-specific to avoid dev deps

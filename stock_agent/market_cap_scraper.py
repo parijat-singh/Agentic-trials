@@ -90,6 +90,13 @@ NYSE_NASDAQ_EXCHANGES = frozenset({
     'NASDAQ Global Select', 'NASDAQ Capital Market', 'NASDAQ Global Market'
 })
 
+def _normalize_sector_for_match(sector_str):
+    """Normalize sector for matching: strip ' sector' suffix, lowercase. yfinance may return 'Energy Sector' or 'Energy'."""
+    if not sector_str:
+        return ''
+    s = str(sector_str).strip().lower().replace(' sector', '').strip()
+    return s
+
 def is_nyse_or_nasdaq(exchange):
     """Return True if exchange is NYSE or NASDAQ."""
     if not exchange:
@@ -201,7 +208,8 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe_by_se
     max_start_date_history = today - timedelta(days=int(min_history*365))
     
     max_start_date_ipo = today - timedelta(days=int(min_ipo_age*365))
-    min_start_date_ipo = today - timedelta(days=int(max_ipo_age*365))
+    # When min_ipo == max_ipo, treat as "at least min_ipo years" (no upper bound) to avoid impossible 1-day window
+    min_start_date_ipo = today - timedelta(days=int(max_ipo_age*365)) if max_ipo_age != min_ipo_age else None
     
     # 1. pre-filter symbols (US Only AND Market Cap)
     candidates = []
@@ -353,9 +361,12 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe_by_se
                 stats["Skipped_Exchange"] += 1
                 continue
             # Industry filter: only include selected sectors (case-insensitive)
+            # Normalize sector: yfinance may return "Energy Sector" or "Energy" - strip " sector" suffix
             if industries and len(industries) > 0:
-                sector = (c.get('sector') or '').strip().lower()
-                if sector not in [str(s).strip().lower() for s in industries]:
+                sector_raw = (c.get('sector') or '').strip().lower()
+                sector = sector_raw.replace(' sector', '').strip() if sector_raw else ''
+                inds_lower = [str(s).strip().lower().replace(' sector', '').strip() for s in industries]
+                if sector not in inds_lower:
                     stats["Skipped_Industry"] += 1
                     continue
             start_date = df.index[0]
@@ -367,7 +378,7 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe_by_se
                 stats["Too_New"] += 1 
                 continue
 
-            if start_date < min_start_date_ipo:
+            if min_start_date_ipo is not None and start_date < min_start_date_ipo:
                 stats["Too_Old"] += 1
                 continue
                 
@@ -503,7 +514,9 @@ def main():
     print(f"\nCollection Complete! Found {len(collected_stocks)} stocks out of {total_stats['Scanned']} scanned.")
     print("Final Stats:", json.dumps(total_stats, indent=2))
     
-    df_meta = pd.DataFrame(collected_stocks)
+    # Ensure valid CSV with headers even when 0 stocks (avoids EmptyDataError downstream)
+    EXPECTED_COLUMNS = ['symbol', 'name', 'market_cap', 'sector', 'exchange', 'start_date', 'pe_ratio']
+    df_meta = pd.DataFrame(collected_stocks, columns=EXPECTED_COLUMNS if not collected_stocks else None)
     df_meta.to_csv(os.path.join(DATA_DIR, "top_100_new_stocks.csv"), index=False)
     
     # Save Stats for Waterfall

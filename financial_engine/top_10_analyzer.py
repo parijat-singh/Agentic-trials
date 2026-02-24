@@ -83,6 +83,106 @@ def get_exclusion_reason(symbol, params, portfolio_symbols):
     except Exception as e:
         return f"Error analyzing: {e}"
 
+
+def _get_top_10_per_sector_from_csv(csv_path, params, portfolio_symbols):
+    """
+    Get top 10 by market cap per sector from top_100_new_stocks.csv.
+    Returns dict { "Sector": [ { Rank, Symbol, Name, Reason }, ... ] } or None if fallback needed.
+    """
+    if not os.path.exists(csv_path):
+        return None
+    df = pd.read_csv(csv_path)
+    sym_col = 'symbol' if 'symbol' in df.columns else 'Symbol'
+    name_col = 'name' if 'name' in df.columns else ('Name' if 'Name' in df.columns else None)
+    mcap_col = 'market_cap' if 'market_cap' in df.columns else ('Market_Cap' if 'Market_Cap' in df.columns else None)
+    sector_col = 'sector' if 'sector' in df.columns else ('Sector' if 'Sector' in df.columns else None)
+
+    if sym_col not in df.columns:
+        return None
+    name_col = name_col or sym_col
+    mcap_col = mcap_col or 'market_cap'
+
+    # Enrich sector from DB if missing
+    if sector_col is None or (sector_col in df.columns and df[sector_col].isna().all()):
+        try:
+            from stock_agent.db_manager import DBManager
+            db = DBManager()
+            sector_col = 'sector'
+            df[sector_col] = df[sym_col].map(lambda s: db.get_sector(s) if isinstance(s, str) else None)
+        except Exception:
+            sector_col = None
+
+    if sector_col not in df.columns or df[sector_col].isna().all():
+        return None
+
+    # Get selected sectors
+    industries = params.get('Industries')
+    if industries:
+        industries = [s.strip() for s in industries if s and str(s).strip()]
+        if not isinstance(industries, list):
+            industries = [s.strip() for s in str(industries).split(',') if s.strip()]
+    if not industries:
+        industries = [str(s) for s in df[sector_col].dropna().unique().tolist()]
+
+    # Normalize sector names for comparison; filter to selected sectors
+    inds_lower = [str(s).strip().lower() for s in industries]
+    df = df[df[sector_col].notna() & df[sector_col].apply(lambda s: str(s).strip().lower() in inds_lower if pd.notna(s) else False)]
+    if df.empty:
+        return None
+
+    # Parse market cap for sorting
+    def mcap_val(row):
+        m = row.get(mcap_col) if mcap_col in df.columns else None
+        if m is None or pd.isna(m):
+            return -1.0
+        v = market_cap_scraper.parse_market_cap(str(m))
+        return v if v is not None else -1.0
+
+    df['_mcap_b'] = df.apply(mcap_val, axis=1)
+    result = {}
+
+    for sector in industries:
+        sector_lower = str(sector).strip().lower()
+        sector_display = next((str(s) for s in df[sector_col].unique() if str(s).strip().lower() == sector_lower), sector)
+        sector_df = df[df[sector_col].apply(lambda s: str(s).strip().lower() == sector_lower if pd.notna(s) else False)]
+        sector_df = sector_df.sort_values('_mcap_b', ascending=False).head(10)
+        if sector_df.empty:
+            continue
+        items = []
+        for rank, (_, row) in enumerate(sector_df.iterrows(), 1):
+            sym = str(row[sym_col]).strip()
+            name = str(row.get(name_col, sym)) if name_col in df.columns else sym
+            reason = get_exclusion_reason(sym, params, portfolio_symbols)
+            items.append({"Rank": rank, "Symbol": sym, "Name": name, "Reason": reason})
+            print(f"[{sector_display}] {sym} #{rank}: {reason}")
+        result[sector_display] = items
+
+    return result if result else None
+
+
+def _get_global_top_10_fallback(params, portfolio_symbols):
+    """Fallback: global top 10 US stocks from scraper (legacy behavior)."""
+    print("Using fallback: global top 10 from market cap list...")
+    companies = market_cap_scraper.get_companies_from_page(1)
+    top_10_us = []
+    for c in companies:
+        if market_cap_scraper.is_likely_us_stock(c['symbol']):
+            top_10_us.append(c)
+            if len(top_10_us) >= 10:
+                break
+    results = []
+    for c in top_10_us:
+        reason = get_exclusion_reason(c['symbol'], params, portfolio_symbols)
+        results.append({
+            "Rank": len(results) + 1,
+            "Symbol": c['symbol'],
+            "Name": c['name'],
+            "Reason": reason
+        })
+        print(f"[{c['symbol']}] {reason}")
+    return results
+
+
 def analyze_top_10():
     print("Running Top 10 Exclusion Analysis...")
     
@@ -103,38 +203,26 @@ def analyze_top_10():
         df = pd.read_csv(portfolio_file)
         if 'Symbol' in df.columns:
             portfolio_symbols = df['Symbol'].tolist()
-            
-    # 3. Fetch Top 10 US Stocks
-    # Reuse scraper logic to get raw list, then filter for first 10 US
-    print("Fetching current Top Market Cap list...")
-    # Fetch enough to get 10 US stocks (page 1 has 100 usually)
-    companies = market_cap_scraper.get_companies_from_page(1)
-    
-    top_10_us = []
-    for c in companies:
-        if market_cap_scraper.is_likely_us_stock(c['symbol']):
-            top_10_us.append(c)
-            if len(top_10_us) >= 10:
-                break
-                
-    # 4. Analyze Each
-    results = []
-    for c in top_10_us:
-        reason = get_exclusion_reason(c['symbol'], params, portfolio_symbols)
-        results.append({
-            "Rank": len(results) + 1,
-            "Symbol": c['symbol'],
-            "Name": c['name'],
-            "Reason": reason
-        })
-        print(f"[{c['symbol']}] {reason}")
-        
-    # 5. Save Results
+        elif 'symbol' in df.columns:
+            portfolio_symbols = df['symbol'].tolist()
+
+    # 3. Try per-sector from top_100_new_stocks.csv
+    csv_path = os.path.join(config.DATA_DIR, "top_100_new_stocks.csv")
+    per_sector = _get_top_10_per_sector_from_csv(csv_path, params, portfolio_symbols)
+
+    if per_sector:
+        output = {"per_sector": per_sector}
+    else:
+        results = _get_global_top_10_fallback(params, portfolio_symbols)
+        output = {"legacy": results}
+
+    # 4. Save Results
     output_file = os.path.join(config.DATA_DIR, "top_10_exclusion.json")
     with open(output_file, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(output, f, indent=2)
         
     print(f"Analysis saved to {output_file}")
+
 
 if __name__ == "__main__":
     analyze_top_10()

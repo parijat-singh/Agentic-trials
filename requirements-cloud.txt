@@ -1,6 +1,7 @@
 # Production dependencies only (no pytest, etc.)
 pandas
 numpy
+tabulate
 yfinance
 scipy
 matplotlib
