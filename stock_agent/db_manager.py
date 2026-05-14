@@ -181,9 +181,12 @@ class DBManager:
     def load_history(self, symbol):
         """Load full history for a symbol as a DataFrame."""
         conn = sqlite3.connect(self.db_path)
-        
-        query = f"SELECT * FROM stock_history WHERE Symbol = '{symbol}' ORDER BY Date ASC"
-        df = pd.read_sql(query, conn)
+
+        df = pd.read_sql(
+            "SELECT * FROM stock_history WHERE Symbol = ? ORDER BY Date ASC",
+            conn,
+            params=(symbol,),
+        )
         
         conn.close()
         

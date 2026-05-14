@@ -69,8 +69,9 @@ _UNIVERSE_PATH = os.path.join(config.MF_STORAGE_ROOT, "mf", "mf_universe.csv")
 def _get_yahoo_session_and_crumb():
     """Return (curl_cffi session, crumb string) or (None, None) on failure."""
     try:
+        import certifi
         import curl_cffi.requests as cr
-        session = cr.Session(verify=False, impersonate="chrome110")
+        session = cr.Session(verify=certifi.where(), impersonate="chrome110")
         session.get("https://finance.yahoo.com/", timeout=15)
         r = session.get(
             "https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10

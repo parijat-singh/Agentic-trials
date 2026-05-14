@@ -403,6 +403,12 @@
         <header>
             <h1>Agentic Analysis Pipeline</h1>
             <p class="subtitle">Configure and run the full stock analysis engine.</p>
+            <div style="margin-top:0.75rem;display:flex;align-items:center;justify-content:center;gap:0.5rem;">
+                <label for="api-key-input" style="font-size:0.8rem;color:var(--text-secondary);">API Key</label>
+                <input type="password" id="api-key-input" placeholder="Leave blank if auth is disabled"
+                    style="font-size:0.8rem;padding:0.25rem 0.6rem;background:var(--card-bg);
+                           border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);width:220px;">
+            </div>
         </header>
 
         <div class="tab-bar">
@@ -663,6 +669,27 @@
             });
         });
 
+        // ── API key helper ────────────────────────────────────────────────────
+        // If the server has SECRET_API_KEY set, every request must include the
+        // matching key.  Store it in localStorage so the user only types it once.
+        function getApiKey() {
+            return (localStorage.getItem('apiKey') || '').trim();
+        }
+        function getApiHeaders(extra) {
+            const headers = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
+            const key = getApiKey();
+            if (key) headers['X-API-Key'] = key;
+            return headers;
+        }
+        // Wire up the API key input
+        const apiKeyInput = document.getElementById('api-key-input');
+        if (apiKeyInput) {
+            apiKeyInput.value = getApiKey();
+            apiKeyInput.addEventListener('change', () => {
+                localStorage.setItem('apiKey', apiKeyInput.value.trim());
+            });
+        }
+
         const form = document.getElementById('analysis-form');
         const runBtn = document.getElementById('run-btn');
         const loadingDiv = document.getElementById('loading');
@@ -750,7 +777,7 @@
             runBtn.disabled = true;
 
             try {
-                await fetch('/stop', { method: 'POST' });
+                await fetch('/stop', { method: 'POST', headers: getApiHeaders({}) });
             } catch (err) {
                 console.error("Failed to stop:", err);
             }
@@ -803,7 +830,7 @@
                 // 1. Start Analysis
                 const startResp = await fetch('/analyze', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getApiHeaders(),
                     body: JSON.stringify(payload)
                 });
 
@@ -855,14 +882,14 @@
                 try {
                     const startResp = await fetch('/etf-analyze', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: getApiHeaders(),
                         body: JSON.stringify(payload)
                     });
                     if (!startResp.ok) throw new Error((await startResp.json()).detail || 'Failed to start');
                     const { session_id } = await startResp.json();
 
                     function pollEtfStatus() {
-                        fetch('/etf-status/' + session_id)
+                        fetch('/etf-status/' + session_id, { headers: getApiHeaders({}) })
                             .then(r => r.json())
                             .then(data => {
                                 if (data.status === 'running') {
@@ -955,14 +982,14 @@
             try {
                 const startResp = await fetch('/mf-analyze', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getApiHeaders(),
                     body: JSON.stringify(payload),
                 });
                 if (!startResp.ok) throw new Error((await startResp.json()).detail || 'Failed to start');
                 const { session_id } = await startResp.json();
 
                 function pollMfStatus() {
-                    fetch('/mf-status/' + session_id)
+                    fetch('/mf-status/' + session_id, { headers: getApiHeaders({}) })
                         .then(r => r.json())
                         .then(data => {
                             if (data.status === 'running') {
@@ -1020,7 +1047,7 @@
 
         async function pollStatus() {
             try {
-                const resp = await fetch('/status');
+                const resp = await fetch('/status', { headers: getApiHeaders({}) });
                 const data = await resp.json();
 
                 // Update logs in real time (stream progress)
@@ -1149,7 +1176,7 @@
             try {
                 const resp = await fetch('/portfolio-compare', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getApiHeaders(),
                     body: JSON.stringify({ holdings, start_date: startDate, end_date: endDate })
                 });
                 const data = await resp.json().catch(() => ({}));

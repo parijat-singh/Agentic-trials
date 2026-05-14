@@ -1,13 +1,17 @@
 import os
 
-# Patch curl_cffi (used by yfinance 1.x) to skip SSL verification on Windows.
-# Python's SSL layer cannot access the Windows system CA store, causing cert
-# errors against Yahoo Finance. This is safe for outbound read-only API calls.
+# Patch curl_cffi (used by yfinance 1.x) to use certifi's CA bundle on Windows.
+# Python's SSL layer cannot access the Windows system CA store directly; certifi
+# ships Mozilla's trusted CA bundle which covers Yahoo Finance and all standard
+# public CAs. This is preferable to verify=False as it preserves certificate
+# validation against a known-good trust store.
 try:
+    import certifi as _certifi
     import curl_cffi.requests as _cr
+    _ca_bundle = _certifi.where()
     _orig_cffi_init = _cr.Session.__init__
     def _patched_cffi_init(self, *args, **kwargs):
-        kwargs.setdefault("verify", False)
+        kwargs.setdefault("verify", _ca_bundle)
         _orig_cffi_init(self, *args, **kwargs)
     _cr.Session.__init__ = _patched_cffi_init
 except ImportError:

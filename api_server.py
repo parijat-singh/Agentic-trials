@@ -1,4 +1,7 @@
-from fastapi import FastAPI, HTTPException
+import re
+
+from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -12,6 +15,27 @@ import time
 import config  # must be top-level so config.ETF_SESSIONS_DIR is available in all endpoints
 
 app = FastAPI(title="Stock Analysis API", description="API to trigger stock analysis pipeline with custom filters.")
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+# Set the SECRET_API_KEY environment variable to require authentication on all
+# pipeline endpoints.  If the variable is unset the server runs in open mode
+# (convenient for local dev).  When set, callers must pass the key as either:
+#   • HTTP header:  X-API-Key: <key>
+#   • Query param:  ?api_key=<key>   (fallback for tools that can't set headers)
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def _require_api_key(key: Optional[str] = Security(_api_key_header)) -> None:
+    expected = os.environ.get("SECRET_API_KEY")
+    if expected and key != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+# ── Session ID validation ─────────────────────────────────────────────────────
+_SESSION_ID_RE = re.compile(r"^[a-f0-9]{8}$")
+
+def _validate_session_id(session_id: str, label: str = "session") -> None:
+    """Reject session IDs that could be used for path traversal."""
+    if not _SESSION_ID_RE.fullmatch(session_id):
+        raise HTTPException(status_code=400, detail=f"Invalid {label} ID format")
 
 
 @app.middleware("http")
@@ -208,7 +232,7 @@ def run_pipeline_background(cmd, cwd):
         state.process = None
 
 @app.post("/analyze")
-async def run_analysis(req: AnalyzeRequest):
+async def run_analysis(req: AnalyzeRequest, _: None = Depends(_require_api_key)):
     """
     Triggers the full analysis pipeline in BACKGROUND.
     Returns immediate success if started.
@@ -253,7 +277,7 @@ async def run_analysis(req: AnalyzeRequest):
     return {"status": "started", "message": "Pipeline started in background."}
 
 @app.post("/portfolio-compare")
-async def portfolio_compare(req: PortfolioCompareRequest):
+async def portfolio_compare(req: PortfolioCompareRequest, _: None = Depends(_require_api_key)):
     """
     Compare a custom portfolio against S&P 500 (SPY) for a given date range.
     Returns metrics (return, volatility, sharpe, alpha, beta) and time series for charting.
@@ -269,7 +293,7 @@ async def portfolio_compare(req: PortfolioCompareRequest):
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 @app.get("/status")
-def get_status():
+def get_status(_: None = Depends(_require_api_key)):
     """
     Returns current status and full logs.
     """
@@ -350,7 +374,7 @@ def run_mf_pipeline_background(session_id: str, req: MFAnalyzeRequest):
 
 
 @app.post("/etf-analyze")
-async def run_etf_analysis(req: ETFAnalyzeRequest):
+async def run_etf_analysis(req: ETFAnalyzeRequest, _: None = Depends(_require_api_key)):
     import uuid
     session_id = str(uuid.uuid4())[:8]
     run_etf_pipeline_background(session_id, req)
@@ -358,7 +382,8 @@ async def run_etf_analysis(req: ETFAnalyzeRequest):
 
 
 @app.get("/etf-status/{session_id}")
-def get_etf_status(session_id: str):
+def get_etf_status(session_id: str, _: None = Depends(_require_api_key)):
+    _validate_session_id(session_id, "ETF session")
     if session_id not in etf_sessions:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     s = etf_sessions[session_id]
@@ -371,8 +396,9 @@ def get_etf_status(session_id: str):
 
 
 @app.get("/etf-log/{session_id}")
-def get_etf_log(session_id: str):
+def get_etf_log(session_id: str, _: None = Depends(_require_api_key)):
     """Return pipeline.log content for a session (for investigation)."""
+    _validate_session_id(session_id, "ETF session")
     log_path = os.path.join(config.ETF_SESSIONS_DIR, session_id, "pipeline.log")
     if not os.path.exists(log_path):
         raise HTTPException(status_code=404, detail=f"Log not found for session {session_id}")
@@ -383,7 +409,7 @@ def get_etf_log(session_id: str):
 # ── Mutual Fund endpoints ─────────────────────────────────────────────────────
 
 @app.post("/mf-analyze")
-async def run_mf_analysis(req: MFAnalyzeRequest):
+async def run_mf_analysis(req: MFAnalyzeRequest, _: None = Depends(_require_api_key)):
     import uuid
     session_id = str(uuid.uuid4())[:8]
     run_mf_pipeline_background(session_id, req)
@@ -391,7 +417,8 @@ async def run_mf_analysis(req: MFAnalyzeRequest):
 
 
 @app.get("/mf-status/{session_id}")
-def get_mf_status(session_id: str):
+def get_mf_status(session_id: str, _: None = Depends(_require_api_key)):
+    _validate_session_id(session_id, "MF session")
     if session_id not in mf_sessions:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     s = mf_sessions[session_id]
@@ -409,8 +436,9 @@ def get_mf_status(session_id: str):
 
 
 @app.get("/mf-log/{session_id}")
-def get_mf_log(session_id: str):
+def get_mf_log(session_id: str, _: None = Depends(_require_api_key)):
     """Return pipeline.log content for a MF session."""
+    _validate_session_id(session_id, "MF session")
     log_path = os.path.join(config.MF_SESSIONS_DIR, session_id, "pipeline.log")
     if not os.path.exists(log_path):
         raise HTTPException(status_code=404, detail=f"Log not found for session {session_id}")
@@ -419,7 +447,7 @@ def get_mf_log(session_id: str):
 
 
 @app.post("/stop")
-def stop_process():
+def stop_process(_: None = Depends(_require_api_key)):
     """
     Terminates the running process.
     """
