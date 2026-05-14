@@ -80,12 +80,22 @@ def test_etf_analyze_post():
 
 
 def test_etf_status_404():
-    """GET /etf-status/{id} returns 404 for unknown session."""
-    response = client.get("/etf-status/nonexistent-id-99")
+    """GET /etf-status/{id} returns 404 for a valid-format but unknown session."""
+    response = client.get("/etf-status/deadbeef")
     assert response.status_code == 404
 
 
 def test_etf_log_404():
-    """GET /etf-log/{id} returns 404 when log file does not exist."""
-    response = client.get("/etf-log/nonexistent-id-99")
+    """GET /etf-log/{id} returns 404 for a valid-format but unknown session."""
+    response = client.get("/etf-log/deadbeef")
     assert response.status_code == 404
+
+
+def test_etf_status_invalid_id():
+    """GET /etf-status/{id} returns 400 for a malformed session ID."""
+    assert client.get("/etf-status/nonexistent-id-99").status_code == 400
+
+
+def test_etf_log_invalid_id():
+    """GET /etf-log/{id} returns 400 for a malformed session ID."""
+    assert client.get("/etf-log/nonexistent-id-99").status_code == 400

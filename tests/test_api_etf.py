@@ -13,7 +13,16 @@ def test_etf_analyze_post():
     assert "session_id" in r.json() and "status" in r.json()
 
 def test_etf_status_404():
-    assert client.get("/etf-status/nonexistent-99").status_code == 404
+    # "deadbeef" is a valid 8-hex-char session ID that doesn't exist → 404
+    assert client.get("/etf-status/deadbeef").status_code == 404
 
 def test_etf_log_404():
-    assert client.get("/etf-log/nonexistent-99").status_code == 404
+    assert client.get("/etf-log/deadbeef").status_code == 404
+
+def test_etf_status_invalid_session_id():
+    # Malformed session IDs → 400 (FastAPI normalises ../ before routing,
+    # so path traversal via URL is already blocked at the framework level)
+    assert client.get("/etf-status/nonexistent-99").status_code == 400
+
+def test_etf_log_invalid_session_id():
+    assert client.get("/etf-log/nonexistent-99").status_code == 400
