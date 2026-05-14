@@ -24,6 +24,7 @@ def run_filter(
 ):
     """
     Apply filters to ETFs in cache. Write etf_stats.json and etf_candidates.csv.
+    Uses bulk DB queries to avoid N+1 round-trips on slow storage paths.
     """
     os.makedirs(session_dir, exist_ok=True)
     db = ETFDB()
@@ -32,8 +33,12 @@ def run_filter(
     candidates = []
     today = datetime.now().date()
 
+    # Bulk-load all metadata and history stats in two queries
+    all_meta = db.get_all_metadata()
+    history_stats = db.get_history_stats_bulk(symbols)
+
     for sym in symbols:
-        meta = db.get_etf_metadata(sym)
+        meta = all_meta.get(sym)
         er = meta.get("expense_ratio") if meta else None
         aum = meta.get("aum") if meta else None
         ex = meta.get("exchange") if meta else None
@@ -48,13 +53,19 @@ def run_filter(
             stats["Exchange"] += 1
             continue
 
-        df = db.load_history(sym)
-        if df.empty or len(df) < 30:
+        hist = history_stats.get(sym)
+        if hist is None:
             stats["History"] += 1
             continue
-        start = df.index.min()
-        if hasattr(start, "date"):
-            start = start.date()
+        min_date_str, _max_date_str, row_count = hist
+        if row_count < 30:
+            stats["History"] += 1
+            continue
+        try:
+            start = datetime.strptime(min_date_str, "%Y-%m-%d").date()
+        except Exception:
+            stats["History"] += 1
+            continue
         years = (today - start).days / 365.25
         if min_history_years is not None and years < min_history_years:
             stats["History"] += 1

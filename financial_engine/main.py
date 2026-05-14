@@ -30,11 +30,10 @@ def main():
     
     # 3. Save Results
     print(f"\n--- Step 3: Saving Top 50 to {OUTPUT_FILE} ---")
-    top_50.to_csv(OUTPUT_FILE, index=False)
-    
     if top_50.empty:
-        print("No stocks passed filtering. Output cleared.")
+        print("No stocks passed filtering. Top 50 file not written.")
         return
+    top_50.to_csv(OUTPUT_FILE, index=False)
     
     print("Success!")
     

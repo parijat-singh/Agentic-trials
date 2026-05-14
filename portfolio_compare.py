@@ -3,6 +3,9 @@ Portfolio comparative analysis: fetch prices, compute metrics vs S&P 500 (SPY),
 and return time series for charting.
 Also: last 3 years return (with IPO handling), mean-variance optimal allocation.
 """
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import config  # applies curl_cffi SSL patch for yfinance
 import pandas as pd
 import numpy as np
 import yfinance as yf

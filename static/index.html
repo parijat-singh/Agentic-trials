@@ -408,6 +408,7 @@
         <div class="tab-bar">
             <button type="button" class="tab-btn active" data-tab="pipeline">Pipeline</button>
             <button type="button" class="tab-btn" data-tab="etf-analysis">ETF Analysis</button>
+            <button type="button" class="tab-btn" data-tab="mf-analysis">Mutual Funds</button>
             <button type="button" class="tab-btn" data-tab="portfolio-compare">Portfolio Compare</button>
         </div>
 
@@ -533,6 +534,70 @@
                         <span id="etf-status-badge" class="status-badge status-idle">Idle</span>
                     </div>
                     <div id="etf-results-area" style="background:#0f172a;font-family:monospace;white-space:pre-wrap;overflow:auto;max-height:70vh;min-height:300px;font-size:0.875rem;padding:1rem;border-radius:0.5rem;color:#e2e8f0">
+                        Results will appear here...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════ MUTUAL FUND TAB ═══════════════ -->
+        <div id="tab-mf-analysis" class="tab-panel">
+            <div class="grid">
+                <div class="card">
+                    <h2 style="margin-top:0">Mutual Fund Parameters</h2>
+                    <form id="mf-form">
+                        <div class="form-group">
+                            <label for="mf_max_expense">Max Expense Ratio (%)</label>
+                            <input type="number" id="mf_max_expense" value="1.5" step="0.1" min="0" max="10">
+                        </div>
+                        <div class="form-group">
+                            <label for="mf_min_aum">Min AUM ($B)</label>
+                            <input type="number" id="mf_min_aum" value="1" step="0.1" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label for="mf_min_history">Min History (Years)</label>
+                            <input type="number" id="mf_min_history" value="5" step="0.5" min="0.5">
+                        </div>
+                        <div class="form-group">
+                            <label>Fund Categories</label>
+                            <div style="display:flex;flex-direction:column;gap:0.4rem;margin-top:0.25rem">
+                                <label style="display:flex;align-items:center;gap:0.5rem;margin:0;font-weight:400;cursor:pointer">
+                                    <input type="checkbox" class="mf-cat-cb" value="Equity" checked> Equity
+                                </label>
+                                <label style="display:flex;align-items:center;gap:0.5rem;margin:0;font-weight:400;cursor:pointer">
+                                    <input type="checkbox" class="mf-cat-cb" value="Bond" checked> Bond
+                                </label>
+                                <label style="display:flex;align-items:center;gap:0.5rem;margin:0;font-weight:400;cursor:pointer">
+                                    <input type="checkbox" class="mf-cat-cb" value="Balanced" checked> Balanced
+                                </label>
+                                <label style="display:flex;align-items:center;gap:0.5rem;margin:0;font-weight:400;cursor:pointer">
+                                    <input type="checkbox" class="mf-cat-cb" value="Alternative"> Alternative
+                                </label>
+                                <label style="display:flex;align-items:center;gap:0.5rem;margin:0;font-weight:400;cursor:pointer">
+                                    <input type="checkbox" class="mf-cat-cb" value="Money Market"> Money Market
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group checkbox-group" style="margin-top:0.75rem">
+                            <input type="checkbox" id="mf_skip_scraper">
+                            <label for="mf_skip_scraper" style="margin-bottom:0;cursor:pointer">Skip Scraper</label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" id="mf_skip_fetcher">
+                            <label for="mf_skip_fetcher" style="margin-bottom:0;cursor:pointer">Skip Fetcher</label>
+                        </div>
+                        <button type="button" id="mf-run-btn">Run MF Analysis</button>
+                        <div id="mf-loading" class="loading-overlay">
+                            <span>Running MF Pipeline...</span>
+                        </div>
+                    </form>
+                </div>
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+                        <h2 style="margin:0">MF Output</h2>
+                        <span id="mf-status-badge" class="status-badge status-idle">Idle</span>
+                    </div>
+                    <div id="mf-results-area" style="background:#0f172a;font-family:monospace;white-space:pre-wrap;overflow:auto;max-height:70vh;min-height:300px;font-size:0.875rem;padding:1rem;border-radius:0.5rem;color:#e2e8f0">
                         Results will appear here...
                     </div>
                 </div>
@@ -853,6 +918,104 @@
         }
         if (etfRunBtn) {
             etfRunBtn.addEventListener('click', (e) => { e.preventDefault(); runEtfPipeline(); });
+        }
+
+        // ── Mutual Fund Analysis ──────────────────────────────────────────────
+        const mfRunBtn      = document.getElementById('mf-run-btn');
+        const mfLoading     = document.getElementById('mf-loading');
+        const mfResultsArea = document.getElementById('mf-results-area');
+        const mfStatusBadge = document.getElementById('mf-status-badge');
+        let mfPollInterval  = null;
+
+        async function runMfPipeline() {
+            mfResultsArea.classList.remove('report-mode');
+            mfResultsArea.innerText = "Starting Mutual Fund pipeline...\n";
+            mfStatusBadge.className = 'status-badge status-running';
+            mfStatusBadge.innerText = 'Running';
+            mfRunBtn.disabled = true;
+            mfLoading.style.display = 'flex';
+
+            const maxExp    = parseFloat(document.getElementById('mf_max_expense').value) || 1.5;
+            const minAumB   = parseFloat(document.getElementById('mf_min_aum').value) || 1;
+            const minHist   = parseFloat(document.getElementById('mf_min_history').value) || 5;
+            const catBoxes  = document.querySelectorAll('.mf-cat-cb:checked');
+            const categories = catBoxes.length > 0
+                ? Array.from(catBoxes).map(cb => cb.value)
+                : null;
+
+            const payload = {
+                max_expense_ratio: maxExp / 100,
+                min_aum:           minAumB * 1e9,
+                min_history_years: minHist,
+                categories:        categories,
+                skip_scraper:      document.getElementById('mf_skip_scraper').checked,
+                skip_fetcher:      document.getElementById('mf_skip_fetcher').checked,
+            };
+
+            try {
+                const startResp = await fetch('/mf-analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!startResp.ok) throw new Error((await startResp.json()).detail || 'Failed to start');
+                const { session_id } = await startResp.json();
+
+                function pollMfStatus() {
+                    fetch('/mf-status/' + session_id)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.status === 'running') {
+                                mfResultsArea.innerText = data.logs || "Waiting...";
+                                mfResultsArea.scrollTop = mfResultsArea.scrollHeight;
+                            }
+                            if (data.status === 'completed') {
+                                clearInterval(mfPollInterval);
+                                mfPollInterval = null;
+                                mfStatusBadge.className = 'status-badge status-success';
+                                mfStatusBadge.innerText = 'Complete';
+                                mfRunBtn.disabled = false;
+                                mfLoading.style.display = 'none';
+                                if (data.report) {
+                                    mfResultsArea.classList.add('report-mode');
+                                    mfResultsArea.innerHTML = (typeof marked !== 'undefined' && marked.parse)
+                                        ? marked.parse(data.report) : data.report;
+                                    mfResultsArea.scrollTop = 0;
+                                } else {
+                                    mfResultsArea.innerText = data.logs || "Done.";
+                                }
+                            } else if (data.status === 'error') {
+                                clearInterval(mfPollInterval);
+                                mfPollInterval = null;
+                                mfStatusBadge.className = 'status-badge status-error';
+                                mfStatusBadge.innerText = 'Error';
+                                mfRunBtn.disabled = false;
+                                mfLoading.style.display = 'none';
+                                mfResultsArea.innerText = data.logs || "Pipeline failed.";
+                            }
+                        })
+                        .catch(err => {
+                            clearInterval(mfPollInterval);
+                            mfPollInterval = null;
+                            mfStatusBadge.className = 'status-badge status-error';
+                            mfStatusBadge.innerText = 'Error';
+                            mfRunBtn.disabled = false;
+                            mfLoading.style.display = 'none';
+                            mfResultsArea.innerText += "\n" + (err.message || "Request failed");
+                        });
+                }
+                mfPollInterval = setInterval(pollMfStatus, 400);
+            } catch (err) {
+                mfStatusBadge.className = 'status-badge status-error';
+                mfStatusBadge.innerText = 'Error';
+                mfRunBtn.disabled = false;
+                mfLoading.style.display = 'none';
+                mfResultsArea.innerText += "\n" + err.message;
+            }
+        }
+
+        if (mfRunBtn) {
+            mfRunBtn.addEventListener('click', (e) => { e.preventDefault(); runMfPipeline(); });
         }
 
         async function pollStatus() {

@@ -9,6 +9,8 @@ import sys
 import threading
 import time
 
+import config  # must be top-level so config.ETF_SESSIONS_DIR is available in all endpoints
+
 app = FastAPI(title="Stock Analysis API", description="API to trigger stock analysis pipeline with custom filters.")
 
 
@@ -68,11 +70,20 @@ class ETFAnalyzeRequest(BaseModel):
     skip_fetcher: bool = False
 
 
+class MFAnalyzeRequest(BaseModel):
+    max_expense_ratio: float = 0.015   # 1.5 % as decimal
+    min_aum: float = 1e9
+    min_history_years: float = 5.0
+    categories: Optional[List[str]] = None   # e.g. ["Equity", "Bond"]
+    skip_scraper: bool = False
+    skip_fetcher: bool = False
+
+
 etf_sessions: Dict[str, Dict] = {}
+mf_sessions:  Dict[str, Dict] = {}
 
 
 def run_etf_pipeline_background(session_id: str, req: ETFAnalyzeRequest):
-    import config
     etf_sessions[session_id] = {"status": "running", "logs": [], "report_path": None}
     cwd = os.path.dirname(os.path.abspath(__file__))
     session_dir = os.path.join(config.ETF_SESSIONS_DIR, session_id)
@@ -279,6 +290,65 @@ def get_status():
         "report": report_content
     }
 
+def run_mf_pipeline_background(session_id: str, req: MFAnalyzeRequest):
+    mf_sessions[session_id] = {"status": "running", "logs": [], "report_path": None}
+    cwd = os.path.dirname(os.path.abspath(__file__))
+    session_dir = os.path.join(config.MF_SESSIONS_DIR, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+    log_file_path = os.path.join(session_dir, "pipeline.log")
+    cmd = [
+        sys.executable, "-u", "run_mf_pipeline.py",
+        f"--session-id={session_id}",
+        f"--max-expense-ratio={req.max_expense_ratio * 100}",
+        f"--min-aum={req.min_aum}",
+        f"--min-history-years={req.min_history_years}",
+        "--max-pages=80",
+    ]
+    if req.categories:
+        cmd.append(f"--categories={','.join(req.categories)}")
+    if req.skip_scraper:
+        cmd.append("--skip-scraper")
+    if req.skip_fetcher:
+        cmd.append("--skip-fetcher")
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
+    def run():
+        try:
+            with open(log_file_path, "w", encoding="utf-8") as log_file:
+                log_file.write(f"--- MF Pipeline started {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+                log_file.write(f"Command: {' '.join(cmd)}\n\n")
+                log_file.flush()
+                p = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, cwd=cwd, bufsize=1, env=env,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+                )
+                for line in iter(p.stdout.readline, ""):
+                    if line:
+                        mf_sessions[session_id]["logs"].append(line)
+                        log_file.write(line)
+                        log_file.flush()
+                p.stdout.close()
+                rc = p.wait()
+                mf_sessions[session_id]["status"] = "completed" if rc == 0 else "error"
+                mf_sessions[session_id]["report_path"] = os.path.join(
+                    config.MF_SESSIONS_DIR, session_id, "MF_REPORT.md"
+                )
+                log_file.write(f"\n--- Exit code: {rc} ---\n")
+        except Exception as e:
+            mf_sessions[session_id]["status"] = "error"
+            err_msg = f"\n[API] Error: {str(e)}\n"
+            mf_sessions[session_id]["logs"].append(err_msg)
+            try:
+                with open(log_file_path, "a", encoding="utf-8") as lf:
+                    lf.write(err_msg)
+            except Exception:
+                pass
+
+    threading.Thread(target=run).start()
+
+
 @app.post("/etf-analyze")
 async def run_etf_analysis(req: ETFAnalyzeRequest):
     import uuid
@@ -303,8 +373,45 @@ def get_etf_status(session_id: str):
 @app.get("/etf-log/{session_id}")
 def get_etf_log(session_id: str):
     """Return pipeline.log content for a session (for investigation)."""
-    import config
     log_path = os.path.join(config.ETF_SESSIONS_DIR, session_id, "pipeline.log")
+    if not os.path.exists(log_path):
+        raise HTTPException(status_code=404, detail=f"Log not found for session {session_id}")
+    with open(log_path, "r", encoding="utf-8") as f:
+        return {"session_id": session_id, "log": f.read()}
+
+
+# ── Mutual Fund endpoints ─────────────────────────────────────────────────────
+
+@app.post("/mf-analyze")
+async def run_mf_analysis(req: MFAnalyzeRequest):
+    import uuid
+    session_id = str(uuid.uuid4())[:8]
+    run_mf_pipeline_background(session_id, req)
+    return {"status": "started", "session_id": session_id}
+
+
+@app.get("/mf-status/{session_id}")
+def get_mf_status(session_id: str):
+    if session_id not in mf_sessions:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    s = mf_sessions[session_id]
+    report_content = None
+    if s["status"] == "completed" and s.get("report_path") and os.path.exists(s["report_path"]):
+        with open(s["report_path"], "r", encoding="utf-8") as f:
+            report_content = f.read()
+    log_path = os.path.join(config.MF_SESSIONS_DIR, session_id, "pipeline.log")
+    return {
+        "status": s["status"],
+        "logs": "".join(s["logs"]),
+        "report": report_content,
+        "log_file": log_path,
+    }
+
+
+@app.get("/mf-log/{session_id}")
+def get_mf_log(session_id: str):
+    """Return pipeline.log content for a MF session."""
+    log_path = os.path.join(config.MF_SESSIONS_DIR, session_id, "pipeline.log")
     if not os.path.exists(log_path):
         raise HTTPException(status_code=404, detail=f"Log not found for session {session_id}")
     with open(log_path, "r", encoding="utf-8") as f:

@@ -18,9 +18,11 @@ class ETFDB:
         self.init_db()
 
     def init_db(self):
-        """Initialize database tables. Enable WAL for concurrent reads."""
+        """Initialize database tables.
+        Note: WAL mode is intentionally NOT used here — the DB lives on Google Drive,
+        which cannot handle WAL's -wal/-shm lock files, causing disk I/O errors.
+        """
         conn = sqlite3.connect(self.db_path)
-        conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS etf_history (
@@ -57,6 +59,30 @@ class ETFDB:
         if result and result[0]:
             return datetime.strptime(result[0], "%Y-%m-%d").date()
         return None
+
+    def get_latest_dates_bulk(self, symbols):
+        """Return a dict {symbol: date} of the latest date for each symbol in one query.
+        Symbols with no data are absent from the returned dict.
+        """
+        if not symbols:
+            return {}
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        # SQLite supports up to ~999 bind params; chunk if needed
+        result = {}
+        chunk_size = 900
+        for i in range(0, len(symbols), chunk_size):
+            chunk = symbols[i : i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            cursor.execute(
+                f"SELECT Symbol, MAX(Date) FROM etf_history WHERE Symbol IN ({placeholders}) GROUP BY Symbol",
+                chunk,
+            )
+            for sym, max_date in cursor.fetchall():
+                if max_date:
+                    result[sym] = datetime.strptime(max_date, "%Y-%m-%d").date()
+        conn.close()
+        return result
 
     def save_history(self, symbol, df):
         """Save price history to etf_history. Expects DatetimeIndex, columns: Open, High, Low, Close, Volume."""
@@ -97,6 +123,46 @@ class ETFDB:
         if "Symbol" in df.columns:
             df = df.drop(columns=["Symbol"])
         return df
+
+    def get_all_metadata(self):
+        """Return a dict {symbol: {expense_ratio, aum, exchange, name}} for all symbols in one query."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT Symbol, ExpenseRatio, AUM, Exchange, Name, UpdatedAt FROM etf_metadata")
+        rows = cursor.fetchall()
+        conn.close()
+        result = {}
+        for sym, er, aum, ex, name, updated_at in rows:
+            result[sym] = {
+                "symbol": sym,
+                "expense_ratio": er,
+                "aum": aum,
+                "exchange": ex,
+                "name": name,
+                "updated_at": updated_at,
+            }
+        return result
+
+    def get_history_stats_bulk(self, symbols):
+        """Return a dict {symbol: (min_date, max_date, row_count)} in one query."""
+        if not symbols:
+            return {}
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        result = {}
+        chunk_size = 900
+        for i in range(0, len(symbols), chunk_size):
+            chunk = symbols[i : i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            cursor.execute(
+                f"SELECT Symbol, MIN(Date), MAX(Date), COUNT(*) FROM etf_history "
+                f"WHERE Symbol IN ({placeholders}) GROUP BY Symbol",
+                chunk,
+            )
+            for sym, min_d, max_d, cnt in cursor.fetchall():
+                result[sym] = (min_d, max_d, cnt)
+        conn.close()
+        return result
 
     def get_etf_metadata(self, symbol):
         """Get stored metadata for symbol. Returns dict or None."""

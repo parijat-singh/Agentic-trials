@@ -16,6 +16,31 @@ from etf_agent.etf_db import ETFDB
 
 BATCH_SIZE = 50
 
+_OHLCV_FIELDS = frozenset({'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close', 'Dividends', 'Stock Splits'})
+
+
+def _extract_ticker_df(data: pd.DataFrame, sym: str):
+    """Extract a single ticker's DataFrame from a yf.download multi-ticker result.
+    Handles both old (Ticker, Field) and new (Field, Ticker) MultiIndex layouts.
+    """
+    if data is None or data.empty:
+        return None
+    try:
+        if not isinstance(data.columns, pd.MultiIndex):
+            df = data.dropna(how='all')
+            return df if not df.empty else None
+        lvl0 = data.columns.get_level_values(0).unique()
+        lvl1 = data.columns.get_level_values(1).unique()
+        if sym in lvl0:
+            df = data[sym].dropna(how='all')
+        elif sym in lvl1:
+            df = data.xs(sym, axis=1, level=1).dropna(how='all')
+        else:
+            return None
+        return df if not df.empty else None
+    except Exception:
+        return None
+
 
 def fetch_etf_metadata(symbol):
     """Get expense ratio, AUM, exchange, name from yfinance."""
@@ -45,8 +70,13 @@ def run_fetcher(universe_path=None):
     today = datetime.now().date()
     symbols_fresh = []
     symbols_update = {}
+
+    # Bulk-fetch all latest dates in a single query (avoids N individual DB connections on slow paths)
+    print(f"Checking cache for {len(symbols)} symbols...", flush=True)
+    latest_dates = db.get_latest_dates_bulk(symbols)
+
     for sym in symbols:
-        last = db.get_latest_date(sym)
+        last = latest_dates.get(sym)
         if last is None:
             symbols_fresh.append(sym)
         else:
@@ -54,6 +84,9 @@ def run_fetcher(universe_path=None):
             if next_day <= today:
                 key = next_day.strftime("%Y-%m-%d")
                 symbols_update.setdefault(key, []).append(sym)
+
+    n_update = sum(len(v) for v in symbols_update.values())
+    print(f"Cache check done: {len(symbols_fresh)} new, {n_update} to update, {len(latest_dates) - n_update} already current.", flush=True)
     for i in range(0, len(symbols_fresh), BATCH_SIZE):
         batch = symbols_fresh[i : i + BATCH_SIZE]
         print(f"Downloading full history for {len(batch)} new ETFs ({i+1}-{i+len(batch)}/{len(symbols_fresh)})...", flush=True)
@@ -62,16 +95,17 @@ def run_fetcher(universe_path=None):
             if data.empty:
                 continue
             if len(batch) == 1:
-                if not data.empty:
-                    db.save_history(batch[0], data)
-                meta = fetch_etf_metadata(batch[0])
-                db.save_etf_metadata(batch[0], meta["expense_ratio"], meta["aum"], meta["exchange"], meta["name"])
+                sym = batch[0]
+                df = _extract_ticker_df(data, sym) if isinstance(data.columns, pd.MultiIndex) else (data.dropna(how='all') if not data.empty else None)
+                if df is not None:
+                    db.save_history(sym, df)
+                meta = fetch_etf_metadata(sym)
+                db.save_etf_metadata(sym, meta["expense_ratio"], meta["aum"], meta["exchange"], meta["name"])
             else:
                 for sym in batch:
-                    if sym in data.columns.levels[0]:
-                        sub = data[sym].dropna(how="all")
-                        if not sub.empty:
-                            db.save_history(sym, sub)
+                    sub = _extract_ticker_df(data, sym)
+                    if sub is not None:
+                        db.save_history(sym, sub)
                     meta = fetch_etf_metadata(sym)
                     db.save_etf_metadata(sym, meta["expense_ratio"], meta["aum"], meta["exchange"], meta["name"])
             time.sleep(1)
@@ -84,14 +118,15 @@ def run_fetcher(universe_path=None):
             if data.empty:
                 continue
             if len(syms) == 1:
-                if not data.empty:
-                    db.save_history(syms[0], data)
+                sym = syms[0]
+                df = _extract_ticker_df(data, sym) if isinstance(data.columns, pd.MultiIndex) else (data.dropna(how='all') if not data.empty else None)
+                if df is not None:
+                    db.save_history(sym, df)
             else:
                 for sym in syms:
-                    if sym in data.columns.levels[0]:
-                        sub = data[sym].dropna(how="all")
-                        if not sub.empty:
-                            db.save_history(sym, sub)
+                    sub = _extract_ticker_df(data, sym)
+                    if sub is not None:
+                        db.save_history(sym, sub)
             time.sleep(1)
         except Exception as e:
             print(f"Update failed: {e}", flush=True)

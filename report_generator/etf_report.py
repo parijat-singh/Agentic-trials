@@ -1,6 +1,7 @@
 """ETF Report - waterfall, top 10, portfolio table, yearly performance."""
 import json
 import os
+import shutil
 import sys
 from datetime import datetime
 
@@ -93,4 +94,12 @@ def generate_etf_report(session_dir):
     report_path = os.path.join(session_dir, "ETF_REPORT.md")
     with open(report_path, "w") as f:
         f.writelines(lines)
+
+    # Archive — same pattern as stock reports
+    os.makedirs(config.ETF_ARCHIVE_DIR, exist_ok=True)
+    archive_name = f"ETF_REPORT_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    archive_path = os.path.join(config.ETF_ARCHIVE_DIR, archive_name)
+    shutil.copy(report_path, archive_path)
+    print(f"Report archived to {archive_path}", flush=True)
+
     return report_path

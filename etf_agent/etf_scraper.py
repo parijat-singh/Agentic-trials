@@ -9,6 +9,8 @@ import time
 
 import pandas as pd
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from bs4 import BeautifulSoup
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -47,7 +49,7 @@ def scrape_etf_page(url):
     """Scrape a single page, return list of {symbol, name}."""
     out = []
     try:
-        r = requests.get(url, headers=HEADERS)
+        r = requests.get(url, headers=HEADERS, verify=False)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
         # ETF links: /name-slug/marketcap/ or full URL (site uses no "etfs" in path)

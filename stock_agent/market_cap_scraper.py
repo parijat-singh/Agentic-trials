@@ -1,10 +1,13 @@
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, timedelta
 import time
 import os
 import random
+
 import yfinance as yf
 import json
 import argparse
@@ -18,6 +21,52 @@ import config
 # Global Constants
 DATA_DIR = config.DATA_DIR
 
+# OHLCV field names — used to distinguish price fields from ticker symbols in MultiIndex columns
+_OHLCV_FIELDS = frozenset({'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close', 'Dividends', 'Stock Splits'})
+
+
+def _extract_ticker_df(data: pd.DataFrame, sym: str):
+    """Extract a single ticker's DataFrame from a yf.download multi-ticker result.
+
+    yfinance 1.x returns (Field, Ticker) MultiIndex; older versions returned (Ticker, Field).
+    Handles both layouts plus single-ticker (flat columns) downloads.
+    """
+    if data is None or data.empty:
+        return None
+    try:
+        if not isinstance(data.columns, pd.MultiIndex):
+            df = data.dropna(how='all')
+            return df if not df.empty else None
+        lvl0 = data.columns.get_level_values(0).unique()
+        lvl1 = data.columns.get_level_values(1).unique()
+        if sym in lvl0:
+            # Old format: (Ticker, Field)
+            df = data[sym].dropna(how='all')
+        elif sym in lvl1:
+            # New format: (Field, Ticker)
+            df = data.xs(sym, axis=1, level=1).dropna(how='all')
+        else:
+            return None
+        return df if not df.empty else None
+    except Exception:
+        return None
+
+
+def _available_tickers(data: pd.DataFrame):
+    """Return ticker symbols present in a yf.download multi-ticker result."""
+    if data is None or data.empty:
+        return []
+    try:
+        if not isinstance(data.columns, pd.MultiIndex):
+            return []
+        for i in range(data.columns.nlevels):
+            lvl = data.columns.get_level_values(i).unique().tolist()
+            if not all(v in _OHLCV_FIELDS for v in lvl):
+                return lvl
+    except Exception:
+        pass
+    return []
+
 def get_companies_from_page(page_num):
     """
     Scrapes a single page of companiesmarketcap.com.
@@ -30,7 +79,7 @@ def get_companies_from_page(page_num):
     
     print(f"Scraping page {page_num}...")
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, verify=False)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -283,18 +332,17 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe_by_se
             
             # Save to DB and Update data_map
             if len(symbols_fresh) == 1:
-                # data is single DF
                 sym = symbols_fresh[0]
-                if not data.empty:
-                    db.save_history(sym, data)
-                    data_map[sym] = data # Use the new data
+                df = _extract_ticker_df(data, sym) if isinstance(data.columns, pd.MultiIndex) else (data.dropna(how='all') if not data.empty else None)
+                if df is not None:
+                    db.save_history(sym, df)
+                    data_map[sym] = df
             else:
                 for sym in symbols_fresh:
-                    if sym in data.columns.levels[0]:
-                        df = data[sym].dropna(how='all')
-                        if not df.empty:
-                            db.save_history(sym, df)
-                            data_map[sym] = df
+                    df = _extract_ticker_df(data, sym)
+                    if df is not None:
+                        db.save_history(sym, df)
+                        data_map[sym] = df
         except Exception as e:
             print(f"Fresh batch download failed: {e}")
 
@@ -309,21 +357,20 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe_by_se
                 # Save to DB and Update data_map
                 if len(syms) == 1:
                     sym = syms[0]
-                    if not data.empty:
-                        db.save_history(sym, data)
-                        # Merge with existing in data_map
+                    df = _extract_ticker_df(data, sym) if isinstance(data.columns, pd.MultiIndex) else (data.dropna(how='all') if not data.empty else None)
+                    if df is not None:
+                        db.save_history(sym, df)
                         if sym in data_map:
-                            data_map[sym] = pd.concat([data_map[sym], data])
+                            data_map[sym] = pd.concat([data_map[sym], df])
                             data_map[sym] = data_map[sym][~data_map[sym].index.duplicated(keep='last')]
                 else:
                     for sym in syms:
-                        if sym in data.columns.levels[0]:
-                            df = data[sym].dropna(how='all')
-                            if not df.empty:
-                                db.save_history(sym, df)
-                                if sym in data_map:
-                                    data_map[sym] = pd.concat([data_map[sym], df])
-                                    data_map[sym] = data_map[sym][~data_map[sym].index.duplicated(keep='last')]
+                        df = _extract_ticker_df(data, sym)
+                        if df is not None:
+                            db.save_history(sym, df)
+                            if sym in data_map:
+                                data_map[sym] = pd.concat([data_map[sym], df])
+                                data_map[sym] = data_map[sym][~data_map[sym].index.duplicated(keep='last')]
             except Exception as e:
                 print(f"Update batch ({start_date}) failed: {e}")
 
@@ -391,17 +438,13 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe_by_se
             sector = c.get('sector')
             max_pe = max_pe_by_sector.get(sector) if (max_pe_by_sector and sector) else None
             if max_pe is not None:
-                if pe is None or pe > max_pe or pe < 0:
+                if pe is not None and pe > 0 and pe > max_pe:
                     stats["Skipped_PE"] += 1
                     continue
             # Current price filter (min only)
             if min_price is not None:
                 price = get_current_price(sym)
-                if price is not None:
-                    if price < min_price:
-                        stats["Skipped_Price"] += 1
-                        continue
-                else:
+                if price is not None and price < min_price:
                     stats["Skipped_Price"] += 1
                     continue
             
@@ -417,7 +460,7 @@ def process_batch(companies, min_history, min_ipo_age, max_ipo_age, max_pe_by_se
                 os.makedirs(DATA_DIR)
             df.to_csv(f"{DATA_DIR}/{sym}.csv")
             
-            pe_str = f" P/E: {pe:.2f}" if max_pe is not None else ""
+            pe_str = f" P/E: {pe:.2f}" if (max_pe is not None and pe is not None) else ""
             ex_str = f" [{c.get('exchange', '')}]" if c.get('exchange') else ""
             print(f"[MATCH] {sym}: Started {start_date.date()} (Cap: {c['market_cap']}){pe_str}{ex_str}", flush=True)
 

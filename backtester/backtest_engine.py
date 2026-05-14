@@ -36,8 +36,13 @@ def load_3y_data(data_dir):
         except Exception:
             pass
 
-    if os.path.exists(top_50_file):
-        meta_df = pd.read_csv(top_50_file)
+    if os.path.exists(top_50_file) and os.path.getsize(top_50_file) > 0:
+        try:
+            meta_df = pd.read_csv(top_50_file)
+        except Exception:
+            meta_df = pd.DataFrame()
+        if meta_df.empty:
+            meta_df = pd.DataFrame()  # fall through to top_100 below
         sym_col = 'Symbol' if 'Symbol' in meta_df.columns else 'symbol'
         if sym_col in meta_df.columns:
             csv_files = [os.path.join(data_dir, f"{s}.csv") for s in meta_df[sym_col]]
