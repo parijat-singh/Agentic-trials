@@ -44,6 +44,23 @@ def _extract_ticker_df(data: pd.DataFrame, sym: str):
         return None
 
 
+def _download_with_retry(symbols, max_retries=3, **kwargs):
+    """yf.download with exponential back-off on rate-limit errors (HTTP 429)."""
+    for attempt in range(max_retries):
+        try:
+            return yf.download(symbols, **kwargs)
+        except Exception as e:
+            msg = str(e).lower()
+            if any(tok in msg for tok in ("rate limit", "too many requests", "429")):
+                wait = 30 * (2 ** attempt)
+                print(f"  Rate limited — retrying in {wait}s (attempt {attempt+1}/{max_retries})...", flush=True)
+                time.sleep(wait)
+            else:
+                raise
+    print("  Exhausted retries after rate-limit errors.", flush=True)
+    return pd.DataFrame()
+
+
 def _fetch_metadata(symbol: str) -> dict:
     """Fetch fund metadata via yfinance."""
     try:
@@ -119,7 +136,7 @@ def run_fetcher(universe_path=None):
             flush=True,
         )
         try:
-            data = yf.download(
+            data = _download_with_retry(
                 batch, period="max", group_by="ticker",
                 auto_adjust=True, progress=False, threads=True,
             )
@@ -145,7 +162,7 @@ def run_fetcher(universe_path=None):
     for start_str, syms in symbols_update.items():
         print(f"Updating {len(syms)} MFs from {start_str}...", flush=True)
         try:
-            data = yf.download(
+            data = _download_with_retry(
                 syms, start=start_str, group_by="ticker",
                 auto_adjust=True, progress=False, threads=True,
             )

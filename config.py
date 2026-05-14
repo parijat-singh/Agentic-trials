@@ -58,9 +58,20 @@ else:
 ETF_CACHE_DB = os.path.join(ETF_STORAGE_ROOT, "etf", "etf_cache.db")
 ETF_SESSIONS_DIR = os.path.join(ETF_STORAGE_ROOT, "sessions")
 ETF_ARCHIVE_DIR = os.path.join(ETF_STORAGE_ROOT, "reports_archive")
-os.makedirs(os.path.dirname(ETF_CACHE_DB), exist_ok=True)
-os.makedirs(ETF_SESSIONS_DIR, exist_ok=True)
-os.makedirs(ETF_ARCHIVE_DIR, exist_ok=True)
+
+
+def _safe_makedirs(*paths):
+    """Create directories, warning instead of crashing if the path is on an
+    offline network drive (e.g. Google Drive unmounted).  The directory will
+    be created lazily on the next successful access."""
+    for p in paths:
+        try:
+            os.makedirs(p, exist_ok=True)
+        except OSError as exc:
+            print(f"[config] Warning: could not create {p}: {exc}", flush=True)
+
+
+_safe_makedirs(os.path.dirname(ETF_CACHE_DB), ETF_SESSIONS_DIR, ETF_ARCHIVE_DIR)
 
 # Mutual Fund storage: same root pattern as ETF
 if os.environ.get("MF_STORAGE_ROOT"):
@@ -75,6 +86,4 @@ else:
 MF_CACHE_DB = os.path.join(_DB_ROOT, "mf_cache.db")
 MF_SESSIONS_DIR = os.path.join(MF_STORAGE_ROOT, "sessions")
 MF_ARCHIVE_DIR = os.path.join(MF_STORAGE_ROOT, "reports_archive")
-os.makedirs(os.path.dirname(MF_CACHE_DB), exist_ok=True)
-os.makedirs(MF_SESSIONS_DIR, exist_ok=True)
-os.makedirs(MF_ARCHIVE_DIR, exist_ok=True)
+_safe_makedirs(os.path.dirname(MF_CACHE_DB), MF_SESSIONS_DIR, MF_ARCHIVE_DIR)

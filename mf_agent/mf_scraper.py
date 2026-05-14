@@ -37,8 +37,6 @@ _SEED_UNIVERSE = [
     "HACAX", "HCAIX",
     # Oakmark
     "OAKMX", "OAKIX", "OAKHX", "OAKBX",
-    # Primecap / Vanguard
-    "VPMCX", "VPMAX",
     # Sequoia / other value
     "SEQUX", "FAIRX",
     # MFS

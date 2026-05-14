@@ -73,8 +73,11 @@ def generate_etf_report(session_dir):
     perf_rows = []
     if os.path.exists(top_path):
         top_df = pd.read_csv(top_path)
-        for sym in top_df["Symbol"].tolist()[:10]:
-            hist = db.load_history(sym)
+        top10_syms = top_df["Symbol"].tolist()[:10]
+        # Single bulk DB query instead of N individual load_history calls
+        histories = db.load_history_bulk(top10_syms)
+        for sym in top10_syms:
+            hist = histories.get(sym, pd.DataFrame())
             if hist.empty or "Close" not in hist.columns:
                 continue
             row = {"Symbol": sym}

@@ -1,5 +1,6 @@
 """Mutual Fund Analysis Pipeline - session-based orchestration."""
 import argparse
+import csv
 import os
 import sys
 import uuid
@@ -73,7 +74,6 @@ def main():
     print("[3/7] Done.\n", flush=True)
 
     # Check candidates count before ranking
-    import csv
     try:
         with open(cand_path) as _f:
             n_cands = sum(1 for _ in _f) - 1  # subtract header

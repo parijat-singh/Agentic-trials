@@ -136,8 +136,11 @@ def generate_mf_report(session_dir):
     perf_rows = []
     if os.path.exists(top_path):
         top_df = pd.read_csv(top_path)
-        for sym in top_df["Symbol"].tolist()[:10]:
-            hist = db.load_history(sym)
+        top10_syms = top_df["Symbol"].tolist()[:10]
+        # Single bulk DB query instead of N individual load_history calls
+        histories = db.load_history_bulk(top10_syms)
+        for sym in top10_syms:
+            hist = histories.get(sym, pd.DataFrame())
             if hist.empty or "Close" not in hist.columns:
                 continue
             row = {"Symbol": sym}
@@ -155,7 +158,11 @@ def generate_mf_report(session_dir):
         perf_path = os.path.join(session_dir, "mf_yearly_performance.csv")
         perf_df.to_csv(perf_path)
         lines.append("## Yearly Performance (Last 3 Years)\n\n")
-        lines.append(perf_df.to_markdown() + "\n\n")
+        try:
+            lines.append(perf_df.to_markdown() + "\n\n")
+        except ImportError:
+            # tabulate not installed — fall back to plain text
+            lines.append(perf_df.to_string() + "\n\n")
 
     report_path = os.path.join(session_dir, "MF_REPORT.md")
     with open(report_path, "w", encoding="utf-8") as f:

@@ -53,12 +53,34 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Global State
 class PipelineState:
-    process: Optional[subprocess.Popen] = None
-    logs: List[str] = []
-    status: str = "idle" # idle, running, completed, error, stopped
-    return_code: Optional[int] = None
+    def __init__(self):
+        self.process: Optional[subprocess.Popen] = None
+        self.logs: List[str] = []
+        self.status: str = "idle"  # idle, running, completed, error, stopped
+        self.return_code: Optional[int] = None
+        self._lock = threading.Lock()
+
+    def append_log(self, line: str) -> None:
+        with self._lock:
+            self.logs.append(line)
+
+    def reset_logs(self) -> None:
+        with self._lock:
+            self.logs = []
+
+    def get_logs_str(self) -> str:
+        with self._lock:
+            return "".join(self.logs)
 
 state = PipelineState()
+
+
+def _cleanup_old_sessions(sessions: Dict[str, Dict], max_age_hours: int = 24) -> None:
+    """Evict sessions older than max_age_hours to prevent unbounded memory growth."""
+    cutoff = time.time() - max_age_hours * 3600
+    stale = [k for k, v in sessions.items() if v.get("_created", 0) < cutoff]
+    for k in stale:
+        del sessions[k]
 
 @app.get("/")
 async def read_root():
@@ -92,6 +114,7 @@ class ETFAnalyzeRequest(BaseModel):
     nyse_nasdaq_only: bool = True
     skip_scraper: bool = False
     skip_fetcher: bool = False
+    max_pages: int = 40  # number of scraper pages (~100 ETFs each)
 
 
 class MFAnalyzeRequest(BaseModel):
@@ -101,6 +124,7 @@ class MFAnalyzeRequest(BaseModel):
     categories: Optional[List[str]] = None   # e.g. ["Equity", "Bond"]
     skip_scraper: bool = False
     skip_fetcher: bool = False
+    max_pages: int = 80  # number of scraper pages (~100 MFs each)
 
 
 etf_sessions: Dict[str, Dict] = {}
@@ -108,14 +132,15 @@ mf_sessions:  Dict[str, Dict] = {}
 
 
 def run_etf_pipeline_background(session_id: str, req: ETFAnalyzeRequest):
-    etf_sessions[session_id] = {"status": "running", "logs": [], "report_path": None}
+    _cleanup_old_sessions(etf_sessions)
+    etf_sessions[session_id] = {"status": "running", "logs": [], "report_path": None, "_created": time.time()}
     cwd = os.path.dirname(os.path.abspath(__file__))
     session_dir = os.path.join(config.ETF_SESSIONS_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
     log_file_path = os.path.join(session_dir, "pipeline.log")
     cmd = [sys.executable, "-u", "run_etf_pipeline.py", f"--session-id={session_id}",
            f"--max-expense-ratio={req.max_expense_ratio*100}", f"--min-aum={req.min_aum}",
-           f"--min-history-years={req.min_history_years}", "--max-pages=40"]
+           f"--min-history-years={req.min_history_years}", f"--max-pages={req.max_pages}"]
     if not req.nyse_nasdaq_only:
         cmd.append("--no-nyse-nasdaq")
     if req.skip_scraper:
@@ -163,7 +188,7 @@ def run_pipeline_background(cmd, cwd):
     """
     global state
     state.status = "running"
-    state.logs = []
+    state.reset_logs()
     state.return_code = None
     
     log_file_path = os.path.join(cwd, "pipeline.log")
@@ -199,32 +224,31 @@ def run_pipeline_background(cmd, cwd):
             # Read logs line by line
             for line in iter(p.stdout.readline, ''):
                 if line:
-                    state.logs.append(line)
+                    state.append_log(line)
                     log_file.write(line)
-                    log_file.flush() # Ensure it's written immediately
-                    
+                    log_file.flush()
+
             p.stdout.close()
             return_code = p.wait()
             state.return_code = return_code
             state.process = None
-            
+
             if return_code == 0:
                 state.status = "completed"
-                msg = f"\n[API] Pipeline finished successfully.\n"
-                state.logs.append(msg)
+                msg = "\n[API] Pipeline finished successfully.\n"
+                state.append_log(msg)
                 log_file.write(msg)
             else:
-                # Check if it was killed manually
-                if return_code == 15 or return_code == 1: # SIGTERM or Error
-                     state.status = "error" # Or stopped?
-                     msg = f"\n[API] Pipeline finished with exit code {return_code}.\n"
-                     state.logs.append(msg)
-                     log_file.write(msg)
+                if return_code == 15 or return_code == 1:  # SIGTERM or Error
+                    state.status = "error"
+                    msg = f"\n[API] Pipeline finished with exit code {return_code}.\n"
+                    state.append_log(msg)
+                    log_file.write(msg)
 
     except Exception as e:
         state.status = "error"
         msg = f"\n[API] Error launching process: {str(e)}\n"
-        state.logs.append(msg)
+        state.append_log(msg)
         try:
             with open(log_file_path, "a") as lf:
                 lf.write(msg)
@@ -310,12 +334,13 @@ def get_status(_: None = Depends(_require_api_key)):
     
     return {
         "status": state.status,
-        "logs": "".join(state.logs),
+        "logs": state.get_logs_str(),
         "report": report_content
     }
 
 def run_mf_pipeline_background(session_id: str, req: MFAnalyzeRequest):
-    mf_sessions[session_id] = {"status": "running", "logs": [], "report_path": None}
+    _cleanup_old_sessions(mf_sessions)
+    mf_sessions[session_id] = {"status": "running", "logs": [], "report_path": None, "_created": time.time()}
     cwd = os.path.dirname(os.path.abspath(__file__))
     session_dir = os.path.join(config.MF_SESSIONS_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
@@ -326,7 +351,7 @@ def run_mf_pipeline_background(session_id: str, req: MFAnalyzeRequest):
         f"--max-expense-ratio={req.max_expense_ratio * 100}",
         f"--min-aum={req.min_aum}",
         f"--min-history-years={req.min_history_years}",
-        "--max-pages=80",
+        f"--max-pages={req.max_pages}",
     ]
     if req.categories:
         cmd.append(f"--categories={','.join(req.categories)}")
@@ -448,23 +473,25 @@ def get_mf_log(session_id: str, _: None = Depends(_require_api_key)):
 
 @app.post("/stop")
 def stop_process(_: None = Depends(_require_api_key)):
-    """
-    Terminates the running process.
-    """
+    """Terminate the running stock pipeline process."""
     global state
-    if state.process:
-        print("API: Stopping process...")
-        state.logs.append("\n[API] User requested STOP. Terminating process...\n")
+    proc = state.process
+    if proc:
+        state.append_log("\n[API] User requested STOP. Terminating process...\n")
         try:
-            # On Windows, p.terminate() is usually enough, but sometimes we need kill
-            state.process.terminate()
-            # If it doesn't die quickly?
-            # state.process.kill() 
+            proc.terminate()
+            # Wait up to 5 s for a clean exit; escalate to SIGKILL if needed
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
         except Exception as e:
-            state.logs.append(f"\n[API] Error stopping process: {e}\n")
-            
+            state.append_log(f"\n[API] Error stopping process: {e}\n")
+        # Set status only after the process has actually exited
         state.status = "stopped"
-        return {"status": "stopped", "message": "Process termination requested."}
+        state.process = None
+        return {"status": "stopped", "message": "Process terminated."}
     else:
         return {"status": "idle", "message": "No process running."}
 

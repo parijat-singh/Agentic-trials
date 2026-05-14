@@ -1,10 +1,15 @@
-import pandas as pd
-import numpy as np
-import os
-import sys
+import concurrent.futures
 import glob
 import json
+import logging
+import os
+import sys
+
+import numpy as np
+import pandas as pd
 from scipy.optimize import minimize
+
+logger = logging.getLogger(__name__)
 
 def _sector_in_industries(sector, industries_list):
     """Case-insensitive check if sector is in industries list."""
@@ -39,7 +44,8 @@ def load_3y_data(data_dir):
     if os.path.exists(top_50_file) and os.path.getsize(top_50_file) > 0:
         try:
             meta_df = pd.read_csv(top_50_file)
-        except Exception:
+        except Exception as e:
+            logger.warning("Could not read top_50_stocks.csv: %s", e)
             meta_df = pd.DataFrame()
         if meta_df.empty:
             meta_df = pd.DataFrame()  # fall through to top_100 below
@@ -93,8 +99,6 @@ def load_3y_data(data_dir):
     # We'll use a rough 756 trading days approximation or date offset
     three_years_ago = pd.Timestamp.now() - pd.DateOffset(years=3)
     
-    import concurrent.futures
-
     def process_file(file_path):
         """Helper to process a single CSV file."""
         try:

@@ -520,6 +520,10 @@
                             <input type="checkbox" id="etf_nyse_nasdaq" checked>
                             <label for="etf_nyse_nasdaq" style="margin-bottom:0;cursor:pointer">NYSE/NASDAQ Only</label>
                         </div>
+                        <div class="form-group">
+                            <label for="etf_max_pages">Scraper Pages (×100 ETFs)</label>
+                            <input type="number" id="etf_max_pages" value="40" step="10" min="1" max="200">
+                        </div>
                         <div class="form-group checkbox-group">
                             <input type="checkbox" id="etf_skip_scraper">
                             <label for="etf_skip_scraper" style="margin-bottom:0;cursor:pointer">Skip Scraper</label>
@@ -584,7 +588,11 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="form-group checkbox-group" style="margin-top:0.75rem">
+                        <div class="form-group" style="margin-top:0.75rem">
+                            <label for="mf_max_pages">Scraper Pages (×100 MFs)</label>
+                            <input type="number" id="mf_max_pages" value="80" step="10" min="1" max="200">
+                        </div>
+                        <div class="form-group checkbox-group">
                             <input type="checkbox" id="mf_skip_scraper">
                             <label for="mf_skip_scraper" style="margin-bottom:0;cursor:pointer">Skip Scraper</label>
                         </div>
@@ -876,7 +884,8 @@
                     min_history_years: parseFloat(document.getElementById('etf_min_history').value) || 3,
                     nyse_nasdaq_only: document.getElementById('etf_nyse_nasdaq').checked,
                     skip_scraper: document.getElementById('etf_skip_scraper').checked,
-                    skip_fetcher: document.getElementById('etf_skip_fetcher').checked
+                    skip_fetcher: document.getElementById('etf_skip_fetcher').checked,
+                    max_pages: parseInt(document.getElementById('etf_max_pages').value) || 40
                 };
 
                 try {
@@ -977,6 +986,7 @@
                 categories:        categories,
                 skip_scraper:      document.getElementById('mf_skip_scraper').checked,
                 skip_fetcher:      document.getElementById('mf_skip_fetcher').checked,
+                max_pages:         parseInt(document.getElementById('mf_max_pages').value) || 80,
             };
 
             try {
