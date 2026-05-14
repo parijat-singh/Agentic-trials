@@ -172,6 +172,28 @@ class MFDB:
             df = df.drop(columns=["Symbol"])
         return df
 
+    def load_history_bulk(self, symbols):
+        """Load history for multiple symbols in a single query.
+        Returns {symbol: DataFrame} with DatetimeIndex. Missing symbols are absent."""
+        if not symbols:
+            return {}
+        conn = sqlite3.connect(self.db_path)
+        result = {}
+        chunk_size = 900
+        for i in range(0, len(symbols), chunk_size):
+            chunk = symbols[i: i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            df = pd.read_sql(
+                f"SELECT * FROM mf_history WHERE Symbol IN ({placeholders}) ORDER BY Symbol, Date ASC",
+                conn, params=chunk,
+            )
+            if not df.empty:
+                df["Date"] = pd.to_datetime(df["Date"])
+                for sym, grp in df.groupby("Symbol", sort=False):
+                    result[sym] = grp.set_index("Date").drop(columns=["Symbol"])
+        conn.close()
+        return result
+
     def list_symbols(self):
         """Return all symbols that have price history."""
         conn = sqlite3.connect(self.db_path)

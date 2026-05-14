@@ -24,8 +24,10 @@ def run_ranker(session_dir, candidates_csv, risk_free_rate=RISK_FREE_RATE, top_n
     symbols = df["symbol"].astype(str).tolist()
     db = ETFDB()
     results = []
+    # Single bulk query instead of N individual DB round-trips
+    histories = db.load_history_bulk(symbols)
     for sym in symbols:
-        hist = db.load_history(sym)
+        hist = histories.get(sym, pd.DataFrame())
         sharpe, ann_ret, ann_vol = calculate_sharpe_ratio(hist, risk_free_rate)
         if sharpe is not None:
             results.append({

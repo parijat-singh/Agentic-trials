@@ -35,8 +35,11 @@ def run_ranker(session_dir, candidates_csv, risk_free_rate=RISK_FREE_RATE, top_n
     # Build a quick lookup for extra metadata from candidates CSV
     meta_lookup = df.set_index("symbol").to_dict("index")
 
+    # Single bulk query instead of N individual DB round-trips
+    histories = db.load_history_bulk(symbols)
+
     for sym in symbols:
-        hist = db.load_history(sym)
+        hist = histories.get(sym, pd.DataFrame())
         if hist.empty or "Close" not in hist.columns:
             continue
         sharpe, ann_ret, ann_vol = calculate_sharpe_ratio(hist, risk_free_rate)

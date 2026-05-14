@@ -108,6 +108,9 @@ def run_fetcher(universe_path=None):
     )
 
     # --- Download full history for new symbols ---
+    # Metadata is fetched separately in the back-fill step below — keeping price
+    # downloads and metadata calls in distinct passes avoids 30 extra HTTP calls
+    # per batch and reduces rate-limit exposure.
     for i in range(0, len(symbols_fresh), BATCH_SIZE):
         batch = symbols_fresh[i: i + BATCH_SIZE]
         print(
@@ -129,15 +132,11 @@ def run_fetcher(universe_path=None):
                        else data.dropna(how="all") or None)
                 if sub is not None:
                     db.save_history(sym, sub)
-                meta = _fetch_metadata(sym)
-                db.save_mf_metadata(sym, **meta)
             else:
                 for sym in batch:
                     sub = _extract_ticker_df(data, sym)
                     if sub is not None:
                         db.save_history(sym, sub)
-                    meta = _fetch_metadata(sym)
-                    db.save_mf_metadata(sym, **meta)
             time.sleep(1)
         except Exception as e:
             print(f"Batch download failed: {e}", flush=True)
@@ -168,17 +167,26 @@ def run_fetcher(universe_path=None):
         except Exception as e:
             print(f"Update failed ({start_str}): {e}", flush=True)
 
-    # Back-fill metadata for any symbol still missing it
+    # Back-fill metadata for any symbol still missing it.
+    # This is the only place _fetch_metadata() is called — price downloads above
+    # intentionally skip it to avoid 30 extra HTTP calls per batch.
+    # Cap at 500 per run to stay within reasonable API rate limits; subsequent
+    # runs will fill the remainder incrementally.
     all_syms = db.list_symbols()
     all_meta = db.get_all_metadata()
     missing_meta = [
-        s for s in all_syms[:300]
+        s for s in all_syms
         if s not in all_meta
         or (all_meta[s].get("aum") is None and all_meta[s].get("expense_ratio") is None)
     ]
     if missing_meta:
-        print(f"Back-filling metadata for {len(missing_meta)} symbols...", flush=True)
-        for sym in missing_meta:
+        to_fill = missing_meta[:500]
+        print(
+            f"Back-filling metadata for {len(to_fill)} symbols "
+            f"({len(missing_meta)} total missing)...",
+            flush=True,
+        )
+        for sym in to_fill:
             meta = _fetch_metadata(sym)
             db.save_mf_metadata(sym, **meta)
             time.sleep(0.2)

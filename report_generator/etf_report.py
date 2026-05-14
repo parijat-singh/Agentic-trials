@@ -51,12 +51,13 @@ def generate_etf_report(session_dir):
     opt_path = os.path.join(session_dir, "optimal_portfolio.csv")
     if os.path.exists(opt_path):
         opt_df = pd.read_csv(opt_path)
+        all_meta = db.get_all_metadata()   # single bulk query
         lines.append("## Optimized Portfolio\n")
         rows = []
         for _, row in opt_df.iterrows():
-            meta = db.get_etf_metadata(row["Symbol"])
-            aum = (meta.get("aum") or 0) if meta else 0
-            er = (meta.get("expense_ratio") or 0) if meta else 0
+            meta = all_meta.get(row["Symbol"]) or {}
+            aum = meta.get("aum") or 0
+            er = meta.get("expense_ratio") or 0
             rows.append({
                 "Symbol": row["Symbol"],
                 "Weight": row["Weight"],
