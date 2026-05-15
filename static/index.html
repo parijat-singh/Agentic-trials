@@ -703,6 +703,7 @@
                             <thead>
                                 <tr style="color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border-color);">
                                     <th style="padding:0.4rem 0.6rem">Symbol</th>
+                                    <th style="padding:0.4rem 0.6rem">Category</th>
                                     <th style="padding:0.4rem 0.6rem">Form</th>
                                     <th style="padding:0.4rem 0.6rem">Date</th>
                                     <th style="padding:0.4rem 0.6rem">File</th>
@@ -1134,9 +1135,10 @@
                         ? '<span style="color:var(--text-secondary)">Already existed</span>'
                         : '<span style="color:var(--success-color)">Downloaded (' + (r.size_kb || '?') + ' KB)</span>';
                 tr.innerHTML =
-                    '<td style="padding:0.4rem 0.6rem">' + (r.symbol || '') + '</td>' +
-                    '<td style="padding:0.4rem 0.6rem">' + (r.form   || '') + '</td>' +
-                    '<td style="padding:0.4rem 0.6rem">' + (r.date   || '') + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem">' + (r.symbol   || '') + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem">' + (r.category || '') + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem;font-family:monospace">' + (r.form || '') + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem">' + (r.date     || '') + '</td>' +
                     '<td style="padding:0.4rem 0.6rem;word-break:break-all;font-size:0.8rem">' + (r.file || '—') + '</td>' +
                     '<td style="padding:0.4rem 0.6rem">' + statusText + '</td>';
                 secFileTbody.appendChild(tr);

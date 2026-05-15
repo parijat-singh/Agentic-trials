@@ -1,15 +1,19 @@
 """
 SEC EDGAR Filings Downloader
 ============================
-Downloads the most recent 10-K (annual) and 10-Q (quarterly) report for each
-stock in the optimized portfolio and saves them to SEC_FILINGS_DIR.
+Downloads the most recent annual and quarterly report for each stock in the
+optimized portfolio and saves them to SEC_FILINGS_DIR.
 
-Filename format : {SYMBOL}_10-K_{YYYY-MM-DD}.htm
-                  {SYMBOL}_10-Q_{YYYY-MM-DD}.htm
+Annual  (in priority order): 10-K  →  20-F  →  40-F
+Quarterly (in priority order): 10-Q  →  6-K
 
-Skip logic      : if ANY file matching {SYMBOL}_{FORM}_* already exists in the
-                  output folder, that symbol+form combination is skipped.  This
-                  lets you re-run safely as the portfolio evolves.
+Filename format : {SYMBOL}_{FORM}_{YYYY-MM-DD}.htm
+                  e.g. VIST_20-F_2026-04-28.htm
+                       HWM_10-K_2025-02-06.htm
+
+Skip logic      : if ANY file matching {SYMBOL}_10-K_*  OR  {SYMBOL}_20-F_*
+                  (etc.) already exists for that report category, skip it.
+                  Re-running is safe as the portfolio evolves.
 
 SEC EDGAR APIs used (public, no auth required):
   • https://www.sec.gov/files/company_tickers.json   – ticker → CIK mapping
@@ -50,8 +54,24 @@ ARCHIVE_URL = (
     "https://www.sec.gov/Archives/edgar/data/{cik}/{accession_nodash}/{doc}"
 )
 
-# Forms to download, in priority order
-TARGET_FORMS = ["10-K", "10-Q"]
+# Form categories: try each list in order; use the first match found.
+# 10-K  = US domestic annual report
+# 20-F  = foreign private issuer annual report
+# 40-F  = Canadian issuer annual report
+# 10-Q  = US domestic quarterly report
+# 6-K   = foreign private issuer interim / current report
+ANNUAL_FORMS    = ["10-K", "20-F", "40-F"]
+QUARTERLY_FORMS = ["10-Q", "6-K"]
+
+# All form variants per category (used for skip-detection glob patterns)
+ALL_ANNUAL_FORMS    = ["10-K", "20-F", "40-F"]
+ALL_QUARTERLY_FORMS = ["10-Q", "6-K"]
+
+# Human-readable category labels (used in log messages)
+CATEGORY_LABEL = {
+    "10-K": "Annual",  "20-F": "Annual",  "40-F": "Annual",
+    "10-Q": "Quarterly", "6-K": "Quarterly",
+}
 
 # Request timeouts
 CONNECT_TIMEOUT = 15   # seconds
@@ -75,20 +95,20 @@ def _get(url: str, **kwargs) -> requests.Response:
             verify=False,  # Windows intermediate-CA issue (same as rest of codebase)
             **kwargs,
         )
-        if r.status_code == 429 or r.status_code == 503:
+        if r.status_code in (429, 503):
             wait = 10 * (attempt + 1)
-            print(f"  [SEC] Rate-limited ({r.status_code}), waiting {wait}s…", flush=True)
+            print(f"  [SEC] Rate-limited ({r.status_code}), waiting {wait}s...", flush=True)
             time.sleep(wait)
             continue
         r.raise_for_status()
         return r
-    r.raise_for_status()  # re-raise after exhausted retries
-    return r
+    r.raise_for_status()
+    return r  # unreachable, satisfies linters
 
 
-def fetch_ticker_cik_map() -> dict[str, str]:
+def fetch_ticker_cik_map() -> dict:
     """Return {TICKER: cik_str} for all SEC-registered companies."""
-    print("Fetching SEC company ticker → CIK map…", flush=True)
+    print("Fetching SEC company ticker->CIK map...", flush=True)
     r = _get(COMPANY_TICKERS_URL)
     data = r.json()
     # SEC format: {"0": {"cik_str": "789019", "ticker": "MSFT", "title": "..."}, …}
@@ -103,28 +123,36 @@ def fetch_submissions(cik_str: str) -> dict:
     return r.json()
 
 
-def find_latest_filing(submissions: dict, form_type: str) -> dict | None:
+def find_latest_filing(submissions: dict, form_types: list) -> dict | None:
     """
-    Scan submissions['filings']['recent'] for the most recent filing of
-    *form_type* (e.g. '10-K', '10-Q').  Returns a dict with keys
-    {date, accession, primary_doc} or None if not found.
+    Scan submissions['filings']['recent'] for the most recent filing whose
+    form matches ANY entry in *form_types*.  Returns a dict with keys
+    {date, accession, primary_doc, form} or None if not found.
 
-    Also checks submissions['filings']['files'] for older filings that have
-    been paginated out to separate JSON files (large filers).
+    form_types is checked in order — the first match (earliest in the list)
+    wins, which lets us prefer 10-K over 20-F when both exist.
     """
-    recent = submissions.get("filings", {}).get("recent", {})
+    recent   = submissions.get("filings", {}).get("recent", {})
     forms    = recent.get("form", [])
     dates    = recent.get("filingDate", [])
     accnos   = recent.get("accessionNumber", [])
     pri_docs = recent.get("primaryDocument", [])
 
+    # Build per-form-type index of the most recent filing
+    best: dict[str, dict] = {}
     for i, form in enumerate(forms):
-        if form == form_type:
-            return {
+        if form in form_types and form not in best:
+            best[form] = {
                 "date":        dates[i],
                 "accession":   accnos[i],
                 "primary_doc": pri_docs[i],
+                "form":        form,
             }
+
+    # Return the highest-priority form type found
+    for ft in form_types:
+        if ft in best:
+            return best[ft]
     return None
 
 
@@ -144,6 +172,23 @@ def download_filing(cik_str: str, filing: dict, dest_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Skip-detection helpers
+# ---------------------------------------------------------------------------
+
+def _any_existing(output_dir: str, symbol: str, form_variants: list) -> str | None:
+    """
+    Return the basename of the first existing file that matches any variant
+    of the given form category, or None if none found.
+    e.g. checks VIST_10-K_*, VIST_20-F_*, VIST_40-F_* for ANNUAL_FORMS.
+    """
+    for fv in form_variants:
+        hits = glob.glob(os.path.join(output_dir, f"{symbol}_{fv}_*"))
+        if hits:
+            return os.path.basename(hits[0])
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -153,21 +198,22 @@ def run_downloader(
     log_callback=None,
 ) -> list[dict]:
     """
-    Download 10-K and 10-Q filings for every stock in the optimized portfolio.
+    Download annual (10-K / 20-F / 40-F) and quarterly (10-Q / 6-K) filings
+    for every stock in the optimized portfolio.
 
     Args:
         portfolio_path: Path to optimal_portfolio.csv.  Defaults to
-                        portfolio_optimizer/optimal_portfolio.csv next to this
-                        package root.
+                        portfolio_optimizer/optimal_portfolio.csv relative to
+                        the package root.
         output_dir:     Folder to save filings.  Defaults to config.SEC_FILINGS_DIR.
         log_callback:   Optional callable(str) for streaming log lines to a
                         caller (e.g. API background thread).
 
     Returns:
-        List of result dicts with keys:
-            symbol, form, date, file   – on success
-            symbol, form, error        – on failure
-            symbol, error              – if CIK not found
+        List of result dicts — one entry per symbol+category:
+            symbol, form, category, date, file, size_kb   – on success
+            symbol, form, category, file, skipped=True     – already exists
+            symbol, category, error                        – failure / not found
     """
     def _log(msg: str):
         print(msg, flush=True)
@@ -196,10 +242,12 @@ def run_downloader(
         return [{"error": "Missing 'Symbol' column in portfolio CSV"}]
 
     symbols = df["Symbol"].str.upper().dropna().unique().tolist()
-    _log(f"Optimized portfolio — {len(symbols)} stock(s): {', '.join(symbols)}")
+    _log(f"Optimized portfolio - {len(symbols)} stock(s): {', '.join(symbols)}")
     _log(f"Output folder: {output_dir}\n")
+    _log("Annual  reports : will try 10-K -> 20-F -> 40-F (whichever is filed)")
+    _log("Quarterly reports: will try 10-Q -> 6-K  (whichever is filed)\n")
 
-    # ── Fetch ticker→CIK map (one request, cached locally) ───────────────────
+    # ── Fetch ticker→CIK map (one request) ───────────────────────────────────
     try:
         ticker_cik = fetch_ticker_cik_map()
         time.sleep(REQUEST_DELAY)
@@ -210,13 +258,18 @@ def run_downloader(
     # ── Process each symbol ──────────────────────────────────────────────────
     results: list[dict] = []
 
+    CATEGORIES = [
+        ("Annual",    ANNUAL_FORMS,    ALL_ANNUAL_FORMS),
+        ("Quarterly", QUARTERLY_FORMS, ALL_QUARTERLY_FORMS),
+    ]
+
     for symbol in symbols:
-        _log(f"─── {symbol} ───────────────────────────────────")
+        _log(f"--- {symbol} ---")
 
         cik_str = ticker_cik.get(symbol)
         if not cik_str:
-            _log(f"  WARNING: No CIK found for {symbol} in SEC database — skipping")
-            results.append({"symbol": symbol, "error": "CIK not found in SEC database"})
+            _log(f"  WARNING: {symbol} not found in SEC EDGAR - skipping")
+            results.append({"symbol": symbol, "error": "Ticker not in SEC EDGAR database"})
             continue
 
         # Fetch filing submissions for this company
@@ -228,69 +281,68 @@ def run_downloader(
             results.append({"symbol": symbol, "error": str(exc)})
             continue
 
-        for form_type in TARGET_FORMS:
-            # ── Skip-if-exists check ─────────────────────────────────────────
-            # Match ANY dated file for this symbol+form, regardless of date.
-            existing = glob.glob(
-                os.path.join(output_dir, f"{symbol}_{form_type}_*")
-            )
-            if existing:
-                existing_name = os.path.basename(existing[0])
-                _log(f"  {form_type}: already have {existing_name} — skipping download")
+        for category, form_priority, all_variants in CATEGORIES:
+            # ── Skip-if-exists: check ALL variants for this category ──────────
+            existing_name = _any_existing(output_dir, symbol, all_variants)
+            if existing_name:
+                _log(f"  {category}: already have {existing_name} - skipping")
                 results.append({
-                    "symbol": symbol,
-                    "form":   form_type,
-                    "file":   existing_name,
-                    "skipped": True,
+                    "symbol":   symbol,
+                    "category": category,
+                    "form":     existing_name.split("_")[1] if "_" in existing_name else "",
+                    "file":     existing_name,
+                    "skipped":  True,
                 })
                 continue
 
-            # ── Find latest filing ───────────────────────────────────────────
-            filing = find_latest_filing(submissions, form_type)
+            # ── Find latest filing (tries each form type in priority order) ──
+            filing = find_latest_filing(submissions, form_priority)
             if not filing:
-                _log(f"  {form_type}: no filing found in SEC EDGAR — skipping")
+                tried = " / ".join(form_priority)
+                _log(f"  {category}: no filing found ({tried}) in SEC EDGAR - skipping")
                 results.append({
-                    "symbol": symbol,
-                    "form":   form_type,
-                    "error":  "No filing found",
+                    "symbol":   symbol,
+                    "category": category,
+                    "error":    f"No {category.lower()} filing found ({tried})",
                 })
                 continue
 
             # ── Build destination path ───────────────────────────────────────
-            date_str  = filing["date"]          # e.g. "2024-11-14"
-            pri_doc   = filing["primary_doc"]   # e.g. "aapl-20240928.htm"
-            ext = os.path.splitext(pri_doc)[1]  # preserve original extension
-            if not ext:
-                ext = ".htm"
-            filename  = f"{symbol}_{form_type}_{date_str}{ext}"
+            actual_form = filing["form"]   # e.g. "20-F", "6-K", "10-K"
+            date_str    = filing["date"]   # e.g. "2024-11-14"
+            pri_doc     = filing["primary_doc"]
+            ext = os.path.splitext(pri_doc)[1] or ".htm"
+            filename  = f"{symbol}_{actual_form}_{date_str}{ext}"
             dest_path = os.path.join(output_dir, filename)
 
-            # ── Download ────────────────────────────────────────────────────
+            # ── Download ─────────────────────────────────────────────────────
             try:
                 source_url = download_filing(cik_str, filing, dest_path)
                 size_kb    = os.path.getsize(dest_path) // 1024
-                _log(f"  {form_type}: saved {filename} ({size_kb:,} KB)")
+                _log(f"  {category} ({actual_form}): saved {filename} ({size_kb:,} KB)")
                 _log(f"           source: {source_url}")
                 results.append({
-                    "symbol": symbol,
-                    "form":   form_type,
-                    "date":   date_str,
-                    "file":   filename,
-                    "size_kb": size_kb,
+                    "symbol":   symbol,
+                    "category": category,
+                    "form":     actual_form,
+                    "date":     date_str,
+                    "file":     filename,
+                    "size_kb":  size_kb,
                 })
                 time.sleep(REQUEST_DELAY)
             except Exception as exc:
-                _log(f"  {form_type}: ERROR downloading — {exc}")
-                # Remove partial file if it exists
+                _log(f"  {category} ({actual_form}): ERROR downloading - {exc}")
+                # Remove partial file
                 if os.path.exists(dest_path):
                     try:
                         os.remove(dest_path)
                     except OSError:
                         pass
                 results.append({
-                    "symbol": symbol,
-                    "form":   form_type,
-                    "error":  str(exc),
+                    "symbol":   symbol,
+                    "category": category,
+                    "form":     actual_form,
+                    "error":    str(exc),
                 })
 
     # ── Summary ──────────────────────────────────────────────────────────────
@@ -299,12 +351,16 @@ def run_downloader(
     errors     = [r for r in results if "error" in r]
 
     _log(f"\n{'='*50}")
-    _log(f"Done.  Downloaded: {len(downloaded)}  |  Skipped (existing): {len(skipped)}  |  Errors: {len(errors)}")
+    _log(
+        f"Done.  Downloaded: {len(downloaded)}"
+        f"  |  Skipped (existing): {len(skipped)}"
+        f"  |  Errors / not found: {len(errors)}"
+    )
     _log(f"Files saved to: {output_dir}")
     if errors:
-        _log("Errors:")
+        _log("Issues:")
         for e in errors:
-            _log(f"  {e.get('symbol', '?')} {e.get('form', '')} — {e.get('error', '')}")
+            _log(f"  {e.get('symbol','?')} {e.get('category','')} - {e.get('error','')}")
 
     return results
 
