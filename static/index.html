@@ -416,7 +416,7 @@
             <button type="button" class="tab-btn" data-tab="etf-analysis">ETF Analysis</button>
             <button type="button" class="tab-btn" data-tab="mf-analysis">Mutual Funds</button>
             <button type="button" class="tab-btn" data-tab="portfolio-compare">Portfolio Compare</button>
-            <button type="button" class="tab-btn" data-tab="sec-filings">SEC Filings</button>
+            <button type="button" class="tab-btn" data-tab="sec-filings">Deep Analysis</button>
         </div>
 
         <div id="tab-pipeline" class="tab-panel active">
@@ -674,54 +674,49 @@
                 </div>
             </div>
         </div>
-        <!-- ═══════════════ SEC FILINGS TAB ═══════════════ -->
+        <!-- ═══════════════ DEEP ANALYSIS TAB ═══════════════ -->
         <div id="tab-sec-filings" class="tab-panel">
             <div class="grid">
                 <div class="card">
-                    <h2 style="margin-top:0">SEC Filings</h2>
+                    <h2 style="margin-top:0">Deep Portfolio Analysis</h2>
                     <p style="color:var(--text-secondary);font-size:0.9rem;margin-top:0">
-                        Downloads the most recent <strong>10-K</strong> (annual) and
-                        <strong>10-Q</strong> (quarterly) report from SEC EDGAR for each
-                        stock in the optimised portfolio.<br><br>
-                        Files are saved with the filing date in the filename.<br>
-                        Already-downloaded filings are skipped automatically.
+                        Downloads any missing <strong>10-K</strong> and <strong>10-Q</strong>
+                        filings from SEC EDGAR, then runs an AI fund-manager analysis on each
+                        portfolio stock using the filings and live market data.<br><br>
+                        Produces an 18-section investment research report per stock (Markdown + HTML).<br>
+                        Reports from the last <strong>60 days</strong> are reused automatically.
                     </p>
-
-                    <div id="sec-output-dir" style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;word-break:break-all;">
-                        Output folder: <em>loading…</em>
+                    <div id="deep-reports-dir" style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;word-break:break-all;">
+                        Reports folder: <em>loading…</em>
                     </div>
-
-                    <button type="button" id="sec-run-btn">Download SEC Filings</button>
-                    <div id="sec-loading" class="loading-overlay" style="display:none;">
-                        <span>Downloading from SEC EDGAR…</span>
+                    <button type="button" id="deep-run-btn">Run AI Analysis</button>
+                    <div id="deep-loading" class="loading-overlay" style="display:none;">
+                        <span>Running deep analysis — this may take several minutes…</span>
                     </div>
                 </div>
                 <div class="card">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-                        <h2 style="margin:0">Download Log</h2>
-                        <span id="sec-status-badge" class="status-badge status-idle">Idle</span>
+                        <h2 style="margin:0">Analysis Log</h2>
+                        <span id="deep-status-badge" class="status-badge status-idle">Idle</span>
                     </div>
-                    <div id="sec-results-area"
+                    <div id="deep-results-area"
                          style="background:#0f172a;font-family:monospace;white-space:pre-wrap;
                                 overflow:auto;max-height:60vh;min-height:200px;
                                 font-size:0.875rem;padding:1rem;border-radius:0.5rem;color:#e2e8f0">
-                        Click "Download SEC Filings" to start.
+                        Click "Run AI Analysis" to start.
                     </div>
-                    <div id="sec-file-list" style="margin-top:1rem;display:none;">
-                        <h3 style="margin:0 0 0.5rem;font-size:0.95rem;">Downloaded / Available Files</h3>
-                        <table id="sec-file-table"
+                    <div id="deep-report-list" style="margin-top:1rem;display:none;">
+                        <h3 style="margin:0 0 0.5rem;font-size:0.95rem;">Generated Reports</h3>
+                        <table id="deep-report-table"
                                style="width:100%;border-collapse:collapse;font-size:0.85rem;">
                             <thead>
                                 <tr style="color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border-color);">
                                     <th style="padding:0.4rem 0.6rem">Symbol</th>
-                                    <th style="padding:0.4rem 0.6rem">Category</th>
-                                    <th style="padding:0.4rem 0.6rem">Form</th>
-                                    <th style="padding:0.4rem 0.6rem">Date</th>
-                                    <th style="padding:0.4rem 0.6rem">File</th>
                                     <th style="padding:0.4rem 0.6rem">Status</th>
+                                    <th style="padding:0.4rem 0.6rem">Report</th>
                                 </tr>
                             </thead>
-                            <tbody id="sec-file-tbody"></tbody>
+                            <tbody id="deep-report-tbody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -1126,53 +1121,67 @@
             mfRunBtn.addEventListener('click', (e) => { e.preventDefault(); runMfPipeline(); });
         }
 
-        // ── SEC Filings Download ──────────────────────────────────────────────
-        const secRunBtn      = document.getElementById('sec-run-btn');
-        const secLoading     = document.getElementById('sec-loading');
-        const secResultsArea = document.getElementById('sec-results-area');
-        const secStatusBadge = document.getElementById('sec-status-badge');
-        const secFileList    = document.getElementById('sec-file-list');
-        const secFileTbody   = document.getElementById('sec-file-tbody');
-        const secOutputDir   = document.getElementById('sec-output-dir');
-        let secPollInterval  = null;
+        // ── Deep Portfolio Analysis ───────────────────────────────────────────
+        const deepRunBtn      = document.getElementById('deep-run-btn');
+        const deepLoading     = document.getElementById('deep-loading');
+        const deepResultsArea = document.getElementById('deep-results-area');
+        const deepStatusBadge = document.getElementById('deep-status-badge');
+        const deepReportList  = document.getElementById('deep-report-list');
+        const deepReportTbody = document.getElementById('deep-report-tbody');
+        const deepReportsDir  = document.getElementById('deep-reports-dir');
+        let deepPollInterval  = null;
 
-        function renderSecResults(results, outputDir) {
+        function renderDeepResults(results, reportsDir) {
             if (!results || results.length === 0) return;
-            if (outputDir) {
-                secOutputDir.innerHTML = 'Output folder: <code style="font-size:0.8rem;">' + outputDir + '</code>';
+            if (reportsDir && deepReportsDir) {
+                deepReportsDir.innerHTML = 'Reports folder: <code style="font-size:0.8rem;">' + reportsDir + '</code>';
             }
-            secFileTbody.innerHTML = '';
+            deepReportTbody.innerHTML = '';
             results.forEach(r => {
                 if (!r.symbol) return;
                 const tr = document.createElement('tr');
                 tr.style.borderBottom = '1px solid var(--border-color)';
-                const statusText = r.error
-                    ? '<span style="color:var(--error-color)">Error: ' + r.error + '</span>'
-                    : r.skipped
-                        ? '<span style="color:var(--text-secondary)">Already existed</span>'
-                        : '<span style="color:var(--success-color)">Downloaded (' + (r.size_kb || '?') + ' KB)</span>';
+
+                let statusCell = '';
+                let reportCell = '—';
+
+                if (r.error) {
+                    statusCell = '<span style="color:var(--error-color)">Error: ' + r.error + '</span>';
+                } else if (r.status === 'skipped') {
+                    statusCell = '<span style="color:var(--text-secondary)">Skipped (report ≤60 days old)</span>';
+                    const mdName  = r.md_path  ? r.md_path.split(/[\\/]/).pop()  : null;
+                    const parts = [];
+                    if (mdName) parts.push('<span style="font-family:monospace;font-size:0.78rem">' + mdName + '</span>');
+                    parts.push('<a href="/deep-analysis-report/' + encodeURIComponent(r.symbol) + '" target="_blank" style="font-size:0.85rem">Open HTML ↗</a>');
+                    reportCell = parts.join(' &nbsp;');
+                } else if (r.status === 'completed') {
+                    statusCell = '<span style="color:var(--success-color)">✓ Completed</span>';
+                    const mdName  = r.md_path  ? r.md_path.split(/[\\/]/).pop()  : null;
+                    const parts = [];
+                    if (mdName) parts.push('<span style="font-family:monospace;font-size:0.78rem">' + mdName + '</span>');
+                    parts.push('<a href="/deep-analysis-report/' + encodeURIComponent(r.symbol) + '" target="_blank" style="font-size:0.85rem">Open HTML ↗</a>');
+                    reportCell = parts.join(' &nbsp;');
+                }
+
                 tr.innerHTML =
-                    '<td style="padding:0.4rem 0.6rem">' + (r.symbol   || '') + '</td>' +
-                    '<td style="padding:0.4rem 0.6rem">' + (r.category || '') + '</td>' +
-                    '<td style="padding:0.4rem 0.6rem;font-family:monospace">' + (r.form || '') + '</td>' +
-                    '<td style="padding:0.4rem 0.6rem">' + (r.date     || '') + '</td>' +
-                    '<td style="padding:0.4rem 0.6rem;word-break:break-all;font-size:0.8rem">' + (r.file || '—') + '</td>' +
-                    '<td style="padding:0.4rem 0.6rem">' + statusText + '</td>';
-                secFileTbody.appendChild(tr);
+                    '<td style="padding:0.4rem 0.6rem;font-weight:600">' + (r.symbol || '') + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem">' + statusCell + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem">' + reportCell + '</td>';
+                deepReportTbody.appendChild(tr);
             });
-            secFileList.style.display = 'block';
+            deepReportList.style.display = 'block';
         }
 
-        async function startSecDownload() {
-            secResultsArea.innerText = 'Starting SEC EDGAR download…\n';
-            secStatusBadge.className = 'status-badge status-running';
-            secStatusBadge.innerText = 'Running';
-            secRunBtn.disabled = true;
-            secLoading.style.display = 'flex';
-            secFileList.style.display = 'none';
+        async function startDeepAnalysis() {
+            deepResultsArea.innerText = 'Starting AI deep analysis…\n';
+            deepStatusBadge.className = 'status-badge status-running';
+            deepStatusBadge.innerText = 'Running';
+            deepRunBtn.disabled = true;
+            deepLoading.style.display = 'flex';
+            deepReportList.style.display = 'none';
 
             try {
-                const resp = await fetch('/sec-download', {
+                const resp = await fetch('/deep-analysis', {
                     method: 'POST',
                     headers: getApiHeaders(),
                     body: JSON.stringify({}),
@@ -1182,101 +1191,99 @@
                     throw new Error(err.detail || resp.statusText || 'Failed to start');
                 }
 
-                function pollSec() {
-                    fetch('/sec-download-status', { headers: getApiHeaders({}) })
+                function pollDeep() {
+                    fetch('/deep-analysis-status', { headers: getApiHeaders({}) })
                         .then(r => r.json())
                         .then(data => {
-                            // Stream logs
-                            secResultsArea.innerText = data.logs || 'Waiting…';
-                            secResultsArea.scrollTop = secResultsArea.scrollHeight;
+                            deepResultsArea.innerText = data.logs || 'Waiting…';
+                            deepResultsArea.scrollTop = deepResultsArea.scrollHeight;
 
-                            if (data.output_dir && secOutputDir) {
-                                secOutputDir.innerHTML = 'Output folder: <code style="font-size:0.8rem;">' + data.output_dir + '</code>';
+                            if (data.reports_dir && deepReportsDir) {
+                                deepReportsDir.innerHTML = 'Reports folder: <code style="font-size:0.8rem;">' + data.reports_dir + '</code>';
                             }
 
                             if (data.status === 'completed') {
-                                clearInterval(secPollInterval);
-                                secPollInterval = null;
-                                secStatusBadge.className = 'status-badge status-success';
-                                secStatusBadge.innerText = 'Complete';
-                                secRunBtn.disabled = false;
-                                secLoading.style.display = 'none';
-                                renderSecResults(data.results, data.output_dir);
+                                clearInterval(deepPollInterval);
+                                deepPollInterval = null;
+                                deepStatusBadge.className = 'status-badge status-success';
+                                deepStatusBadge.innerText = 'Complete';
+                                deepRunBtn.disabled = false;
+                                deepLoading.style.display = 'none';
+                                renderDeepResults(data.results, data.reports_dir);
                             } else if (data.status === 'error') {
-                                clearInterval(secPollInterval);
-                                secPollInterval = null;
-                                secStatusBadge.className = 'status-badge status-error';
-                                secStatusBadge.innerText = 'Error';
-                                secRunBtn.disabled = false;
-                                secLoading.style.display = 'none';
+                                clearInterval(deepPollInterval);
+                                deepPollInterval = null;
+                                deepStatusBadge.className = 'status-badge status-error';
+                                deepStatusBadge.innerText = 'Error';
+                                deepRunBtn.disabled = false;
+                                deepLoading.style.display = 'none';
                                 if (data.results && data.results.length) {
-                                    renderSecResults(data.results, data.output_dir);
+                                    renderDeepResults(data.results, data.reports_dir);
                                 }
                             }
                         })
                         .catch(err => {
-                            clearInterval(secPollInterval);
-                            secPollInterval = null;
-                            secStatusBadge.className = 'status-badge status-error';
-                            secStatusBadge.innerText = 'Error';
-                            secRunBtn.disabled = false;
-                            secLoading.style.display = 'none';
-                            secResultsArea.innerText += '\n' + (err.message || 'Request failed');
+                            clearInterval(deepPollInterval);
+                            deepPollInterval = null;
+                            deepStatusBadge.className = 'status-badge status-error';
+                            deepStatusBadge.innerText = 'Error';
+                            deepRunBtn.disabled = false;
+                            deepLoading.style.display = 'none';
+                            deepResultsArea.innerText += '\n' + (err.message || 'Request failed');
                         });
                 }
-                secPollInterval = setInterval(pollSec, 600);
+                deepPollInterval = setInterval(pollDeep, 800);
             } catch (err) {
-                secStatusBadge.className = 'status-badge status-error';
-                secStatusBadge.innerText = 'Error';
-                secRunBtn.disabled = false;
-                secLoading.style.display = 'none';
-                secResultsArea.innerText += '\n' + err.message;
+                deepStatusBadge.className = 'status-badge status-error';
+                deepStatusBadge.innerText = 'Error';
+                deepRunBtn.disabled = false;
+                deepLoading.style.display = 'none';
+                deepResultsArea.innerText += '\n' + err.message;
             }
         }
 
-        // Pre-load current status/output dir on page load
-        fetch('/sec-download-status', { headers: getApiHeaders({}) })
+        // Pre-load deep analysis status on page load
+        fetch('/deep-analysis-status', { headers: getApiHeaders({}) })
             .then(r => r.json())
             .then(data => {
-                if (data.output_dir) {
-                    secOutputDir.innerHTML = 'Output folder: <code style="font-size:0.8rem;">' + data.output_dir + '</code>';
+                if (data.reports_dir && deepReportsDir) {
+                    deepReportsDir.innerHTML = 'Reports folder: <code style="font-size:0.8rem;">' + data.reports_dir + '</code>';
                 }
                 if (data.status === 'running') {
-                    // Re-attach to an in-progress job
-                    secStatusBadge.className = 'status-badge status-running';
-                    secStatusBadge.innerText = 'Running';
-                    secRunBtn.disabled = true;
-                    secLoading.style.display = 'flex';
-                    secResultsArea.innerText = data.logs || 'Running…';
-                    secPollInterval = setInterval(() => {
-                        fetch('/sec-download-status', { headers: getApiHeaders({}) })
+                    deepStatusBadge.className = 'status-badge status-running';
+                    deepStatusBadge.innerText = 'Running';
+                    deepRunBtn.disabled = true;
+                    deepLoading.style.display = 'flex';
+                    deepResultsArea.innerText = data.logs || 'Running…';
+                    deepPollInterval = setInterval(() => {
+                        fetch('/deep-analysis-status', { headers: getApiHeaders({}) })
                             .then(r => r.json()).then(d => {
-                                secResultsArea.innerText = d.logs || '';
-                                secResultsArea.scrollTop = secResultsArea.scrollHeight;
+                                deepResultsArea.innerText = d.logs || '';
+                                deepResultsArea.scrollTop = deepResultsArea.scrollHeight;
                                 if (d.status !== 'running') {
-                                    clearInterval(secPollInterval);
-                                    secPollInterval = null;
-                                    secRunBtn.disabled = false;
-                                    secLoading.style.display = 'none';
-                                    secStatusBadge.className = d.status === 'completed'
+                                    clearInterval(deepPollInterval);
+                                    deepPollInterval = null;
+                                    deepRunBtn.disabled = false;
+                                    deepLoading.style.display = 'none';
+                                    deepStatusBadge.className = d.status === 'completed'
                                         ? 'status-badge status-success' : 'status-badge status-error';
-                                    secStatusBadge.innerText = d.status === 'completed' ? 'Complete' : 'Error';
-                                    if (d.results) renderSecResults(d.results, d.output_dir);
+                                    deepStatusBadge.innerText = d.status === 'completed' ? 'Complete' : 'Error';
+                                    if (d.results) renderDeepResults(d.results, d.reports_dir);
                                 }
-                            }).catch(() => { clearInterval(secPollInterval); });
-                    }, 600);
+                            }).catch(() => { clearInterval(deepPollInterval); });
+                    }, 800);
                 } else if ((data.status === 'completed' || data.status === 'error') && data.results && data.results.length) {
-                    secStatusBadge.className = data.status === 'completed'
+                    deepStatusBadge.className = data.status === 'completed'
                         ? 'status-badge status-success' : 'status-badge status-error';
-                    secStatusBadge.innerText = data.status === 'completed' ? 'Complete' : 'Error';
-                    secResultsArea.innerText = data.logs || '';
-                    renderSecResults(data.results, data.output_dir);
+                    deepStatusBadge.innerText = data.status === 'completed' ? 'Complete' : 'Error';
+                    deepResultsArea.innerText = data.logs || '';
+                    renderDeepResults(data.results, data.reports_dir);
                 }
             })
-            .catch(() => {}); // silently ignore if server not yet ready
+            .catch(() => {});
 
-        if (secRunBtn) {
-            secRunBtn.addEventListener('click', (e) => { e.preventDefault(); startSecDownload(); });
+        if (deepRunBtn) {
+            deepRunBtn.addEventListener('click', (e) => { e.preventDefault(); startDeepAnalysis(); });
         }
 
         async function pollStatus() {

@@ -97,3 +97,14 @@ elif os.environ.get("K_SERVICE") or os.environ.get("DATA_DIR"):
 else:
     SEC_FILINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sec_filings")
 _safe_makedirs(SEC_FILINGS_DIR)
+
+# Deep Portfolio Analysis: AI-generated per-stock investment reports
+if os.environ.get("DEEP_ANALYSIS_DIR"):
+    DEEP_ANALYSIS_DIR = os.environ["DEEP_ANALYSIS_DIR"]
+elif os.path.exists(r"G:\My Drive\Agentic-trials-data"):
+    DEEP_ANALYSIS_DIR = os.path.join(r"G:\My Drive\Agentic-trials-data", "deep_analysis")
+elif os.environ.get("K_SERVICE") or os.environ.get("DATA_DIR"):
+    DEEP_ANALYSIS_DIR = os.path.join(os.environ.get("DATA_DIR", "/tmp/app_data"), "deep_analysis")
+else:
+    DEEP_ANALYSIS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deep_analysis_reports")
+_safe_makedirs(DEEP_ANALYSIS_DIR)

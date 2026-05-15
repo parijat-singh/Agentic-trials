@@ -134,57 +134,86 @@ class DBManager:
         # Ensure index is datetime and reset to column for storage
         df = df.copy()
         if not isinstance(df.index, pd.DatetimeIndex):
-             # Try to convert if it's not already
-             try:
+            try:
                 df.index = pd.to_datetime(df.index)
-             except:
-                print(f"Error: DataFrame index for {symbol} is not DatetimeIndex")
+            except Exception:
+                print(f"Error: DataFrame index for {symbol} is not DatetimeIndex", flush=True)
                 return
 
         df = df.reset_index()
-        # Rename 'Date' or 'index' to 'Date' if needed, though yfinance usually gives 'Date' name to index or index has no name but we reset it
-        if 'Date' not in df.columns and 'index' in df.columns:
-            df.rename(columns={'index': 'Date'}, inplace=True)
-            
+        # Normalise the date column: yfinance uses 'Date' (daily) or 'Datetime' (intraday);
+        # after reset_index() an unnamed index becomes 'index'.
+        for _date_col in ('Datetime', 'index'):
+            if 'Date' not in df.columns and _date_col in df.columns:
+                df.rename(columns={_date_col: 'Date'}, inplace=True)
+                break
+
         # Ensure 'Date' is string YYYY-MM-DD
-        df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+        df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
         df['Symbol'] = symbol
-        
+
         # Select and order columns to match table
         cols_to_keep = ['Date', 'Symbol', 'Open', 'High', 'Low', 'Close', 'Volume']
-        # yfinance sometimes uses 'Adj Close' - use it if 'Close' missing
+        # yfinance sometimes uses 'Adj Close' — use it when 'Close' is absent
         if 'Close' not in df.columns and 'Adj Close' in df.columns:
             df['Close'] = df['Adj Close']
         for col in cols_to_keep:
             if col not in df.columns:
                 df[col] = None
         data_to_store = df[cols_to_keep].copy()
-        # Coerce Volume to nullable integer (table expects INTEGER; float/NaN can cause issues)
-        if 'Volume' in data_to_store.columns:
-            data_to_store['Volume'] = pd.to_numeric(data_to_store['Volume'], errors='coerce').astype('Int64')
+        # Use float64 for all numeric columns — sqlite3 cannot bind pandas NA/Int64,
+        # and NaN in float64 maps cleanly to SQL NULL.
+        for col in ('Open', 'High', 'Low', 'Close', 'Volume'):
+            data_to_store[col] = pd.to_numeric(data_to_store[col], errors='coerce')
 
-        # Use timeout to wait for lock (e.g. concurrent access or sync tool); retry once on failure
+        # Build plain Python tuples: sqlite3 cannot bind numpy/pandas NA types,
+        # and pandas wraps IntegrityError inside DatabaseError so catching it is
+        # unreliable. Using executemany + INSERT OR IGNORE fixes both problems.
+        _INSERT = (
+            'INSERT OR IGNORE INTO stock_history '
+            '(Date, Symbol, Open, High, Low, Close, Volume) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )
+
+        def _py(v):
+            """Convert a value to a sqlite3-safe Python scalar (NaN/NA → None)."""
+            if v is None:
+                return None
+            try:
+                import math
+                if isinstance(v, float) and math.isnan(v):
+                    return None
+            except Exception:
+                pass
+            try:
+                if pd.isna(v):
+                    return None
+            except Exception:
+                pass
+            # unwrap numpy scalars to Python natives
+            return v.item() if hasattr(v, 'item') else v
+
+        rows = [tuple(_py(v) for v in row)
+                for row in data_to_store.itertuples(index=False, name=None)]
+
         timeout_sec = 30
-        last_err = None
         for attempt in range(2):
             try:
                 conn = sqlite3.connect(self.db_path, timeout=timeout_sec)
                 try:
-                    data_to_store.to_sql('stock_history', conn, if_exists='append', index=False)
+                    conn.executemany(_INSERT, rows)
                     conn.commit()
                     return
                 finally:
                     conn.close()
-            except sqlite3.IntegrityError:
-                print(f"Warning: Duplicate data for {symbol}, skipping.", flush=True)
-                return
             except Exception as e:
-                last_err = e
                 if attempt == 0:
                     import time
                     time.sleep(0.5)
                     continue
-                print(f"Error saving {symbol} to DB: {type(e).__name__}: {e}", flush=True)
+                cause = getattr(e, '__cause__', None) or getattr(e, '__context__', None)
+                detail = f" (caused by: {cause})" if cause else ""
+                print(f"Error saving {symbol} to DB: {type(e).__name__}: {e}{detail}", flush=True)
             
     def load_history(self, symbol):
         """Load full history for a symbol as a DataFrame."""

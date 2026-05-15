@@ -1,6 +1,22 @@
 import re
+import sys
+
+# Force UTF-8 stdout/stderr so Unicode in AI responses doesn't crash on Windows
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+# Load .env from the project root before anything else reads os.environ
+try:
+    import os as _os
+    from dotenv import load_dotenv
+    load_dotenv(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".env"), override=True)
+except ImportError:
+    pass
 
 from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi.responses import FileResponse
 from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -508,7 +524,7 @@ sec_state = SecDownloadState()
 
 def _run_sec_download_background(portfolio_path: Optional[str], output_dir: Optional[str]) -> None:
     """Background worker: runs the SEC filings downloader and updates sec_state."""
-    from sec_downloader.sec_filings_downloader import run_downloader
+    from deep_analysis.sec_downloader import run_downloader
 
     def _log(line: str):
         sec_state.append_log(line)
@@ -556,6 +572,116 @@ def get_sec_download_status(_: None = Depends(_require_api_key)):
         "results": sec_state.results,
         "output_dir": config.SEC_FILINGS_DIR,
     }
+
+
+# ── Deep Portfolio Analysis ───────────────────────────────────────────────────
+
+class DeepAnalysisState:
+    def __init__(self):
+        self.status: str = "idle"   # idle | running | completed | error
+        self.logs:   list[str] = []
+        self.results: list[dict] = []
+        self._lock = threading.Lock()
+
+    def append_log(self, line: str) -> None:
+        with self._lock:
+            self.logs.append(line)
+
+    def get_logs_str(self) -> str:
+        with self._lock:
+            return "".join(self.logs)
+
+    def reset(self) -> None:
+        with self._lock:
+            self.logs = []
+            self.results = []
+            self.status = "running"
+
+
+deep_analysis_state = DeepAnalysisState()
+
+
+def _run_deep_analysis_background(
+    portfolio_path: Optional[str],
+    sec_filings_dir: Optional[str],
+    reports_dir: Optional[str],
+    symbols: Optional[list],
+) -> None:
+    """Background worker: runs the deep portfolio analysis and updates deep_analysis_state."""
+    from deep_analysis.main import run_deep_analysis
+
+    def _log(line: str):
+        deep_analysis_state.append_log(line)
+
+    try:
+        results = run_deep_analysis(
+            portfolio_path=portfolio_path,
+            sec_filings_dir=sec_filings_dir,
+            reports_dir=reports_dir,
+            symbols=symbols,
+            log_callback=_log,
+        )
+        with deep_analysis_state._lock:
+            deep_analysis_state.results = results
+            deep_analysis_state.status = "completed"
+    except Exception as exc:
+        deep_analysis_state.append_log(f"\n[API] Unexpected error: {exc}\n")
+        with deep_analysis_state._lock:
+            deep_analysis_state.status = "error"
+
+
+class DeepAnalysisRequest(BaseModel):
+    portfolio_path: Optional[str] = None
+    symbols: Optional[list] = None   # if None, analyse all portfolio stocks
+    reports_dir: Optional[str] = None
+
+
+@app.post("/deep-analysis")
+async def start_deep_analysis(
+    req: DeepAnalysisRequest = DeepAnalysisRequest(),
+    _: None = Depends(_require_api_key),
+):
+    """Start a background deep AI analysis for all (or specified) portfolio stocks."""
+    if deep_analysis_state.status == "running":
+        raise HTTPException(status_code=400, detail="Deep analysis already in progress.")
+    deep_analysis_state.reset()
+    threading.Thread(
+        target=_run_deep_analysis_background,
+        args=(req.portfolio_path, config.SEC_FILINGS_DIR, req.reports_dir, req.symbols),
+        daemon=True,
+    ).start()
+    return {"status": "started", "message": "Deep portfolio analysis started in background."}
+
+
+@app.get("/deep-analysis-status")
+def get_deep_analysis_status(_: None = Depends(_require_api_key)):
+    """Return current status, streaming logs, and results of the deep analysis job."""
+    return {
+        "status":      deep_analysis_state.status,
+        "logs":        deep_analysis_state.get_logs_str(),
+        "results":     deep_analysis_state.results,
+        "reports_dir": config.DEEP_ANALYSIS_DIR,
+    }
+
+
+@app.get("/deep-analysis-report/{symbol}")
+def get_deep_analysis_report(symbol: str):
+    """Serve the latest HTML deep-analysis report for a given stock symbol."""
+    import glob as _glob
+    sym = symbol.upper()
+    pattern = os.path.join(config.DEEP_ANALYSIS_DIR, f"{sym}_deep_analysis_*.html")
+    matches = sorted(_glob.glob(pattern), reverse=True)
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"No report found for {sym}")
+    return FileResponse(matches[0], media_type="text/html")
+
+
+@app.post("/deep-analysis-regenerate-html")
+def regenerate_html_reports_endpoint(_: None = Depends(_require_api_key)):
+    """Re-render all existing .md reports to HTML using the current template."""
+    from deep_analysis.report_writer import regenerate_html_reports
+    count = regenerate_html_reports(config.DEEP_ANALYSIS_DIR)
+    return {"status": "ok", "regenerated": count, "reports_dir": config.DEEP_ANALYSIS_DIR}
 
 
 @app.post("/stop")
