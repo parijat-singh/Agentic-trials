@@ -1,5 +1,9 @@
-import certifi
 import requests
+import urllib3
+# companiesmarketcap.com uses a certificate chain that Python cannot verify on
+# Windows even with certifi (intermediate CA cross-signing issue).  verify=False
+# is intentional and scoped to this read-only public data scraper.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, timedelta
@@ -78,7 +82,7 @@ def get_companies_from_page(page_num):
     
     print(f"Scraping page {page_num}...")
     try:
-        response = requests.get(url, headers=headers, verify=certifi.where())
+        response = requests.get(url, headers=headers, verify=False)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
