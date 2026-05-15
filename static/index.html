@@ -468,6 +468,17 @@
                         <input type="number" id="min_price" placeholder="e.g. 10" step="0.01" min="0">
                     </div>
 
+                    <div class="form-group">
+                        <label for="include_stocks">Include stocks (optional)</label>
+                        <input type="text" id="include_stocks" placeholder="e.g. AAPL, MSFT, APH" autocomplete="off">
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">Comma-separated. These symbols are <strong>added</strong> to the optimization universe (even if not in the ranked top 50). They must have price data from this run or a previous run (pipeline or DB); otherwise they are skipped.</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="exclude_stocks">Exclude stocks (optional)</label>
+                        <input type="text" id="exclude_stocks" placeholder="e.g. BLTE, TFPM" autocomplete="off">
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">Comma-separated. These symbols are <strong>removed</strong> from the optimization universe.</div>
+                    </div>
+
                     <div class="form-group checkbox-group">
                         <input type="checkbox" id="nyse_nasdaq_only" checked>
                         <label for="nyse_nasdaq_only" style="margin-bottom: 0; cursor: pointer;">NYSE/NASDAQ Only</label>
@@ -876,6 +887,10 @@
             const minMarketCapVal = (document.getElementById('min_market_cap').value || '').trim();
             const minPriceVal = (document.getElementById('min_price').value || '').trim();
             const minPriceNum = minPriceVal !== '' ? parseFloat(minPriceVal) : NaN;
+            const includeStocksVal = (document.getElementById('include_stocks').value || '').trim();
+            const excludeStocksVal = (document.getElementById('exclude_stocks').value || '').trim();
+            const includeStocks = includeStocksVal ? includeStocksVal.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : null;
+            const excludeStocks = excludeStocksVal ? excludeStocksVal.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : null;
 
             const payload = {
                 min_history: parseFloat(document.getElementById('min_history').value),
@@ -885,6 +900,8 @@
                 min_price: (!isNaN(minPriceNum) && minPriceNum >= 0) ? minPriceNum : null,
                 no_exchange_filter: !document.getElementById('nyse_nasdaq_only').checked,
                 industries: industriesChecked.length > 0 ? industriesChecked : null,
+                include_stocks: includeStocks,
+                exclude_stocks: excludeStocks,
                 skip_scraper: document.getElementById('skip_scraper').checked
             };
 

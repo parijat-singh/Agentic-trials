@@ -103,6 +103,8 @@ class AnalyzeRequest(BaseModel):
     min_price: Optional[float] = None
     no_exchange_filter: bool = False
     industries: Optional[List[str]] = None
+    include_stocks: Optional[List[str]] = None  # Only consider these in the optimized portfolio
+    exclude_stocks: Optional[List[str]] = None  # Exclude these from the optimized portfolio
     max_pages: int = 200
     skip_scraper: bool = False
 
@@ -288,6 +290,12 @@ async def run_analysis(req: AnalyzeRequest, _: None = Depends(_require_api_key))
     industries_str = ",".join(str(s).strip() for s in industries if s) if isinstance(industries, list) else ""
     if isinstance(industries, list) and len(industries) > 0 and industries_str:
         cmd.append(f"--industries={industries_str}")
+    include_str = ",".join(str(s).strip().upper() for s in (req.include_stocks or []) if s and str(s).strip())
+    if include_str:
+        cmd.append(f"--include-stocks={include_str}")
+    exclude_str = ",".join(str(s).strip().upper() for s in (req.exclude_stocks or []) if s and str(s).strip())
+    if exclude_str:
+        cmd.append(f"--exclude-stocks={exclude_str}")
 
     if req.skip_scraper:
         cmd.append("--skip-scraper")

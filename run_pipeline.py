@@ -53,9 +53,13 @@ def main():
     parser.add_argument("--no-exchange-filter", action="store_true", help="Disable NYSE/NASDAQ-only filter")
     parser.add_argument("--industries", type=str, default=None,
                         help="Comma-separated sectors to include (e.g. Technology,Healthcare)")
+    parser.add_argument("--include-stocks", type=str, default=None,
+                        help="Comma-separated symbols to INCLUDE in the optimized portfolio (only these will be considered)")
+    parser.add_argument("--exclude-stocks", type=str, default=None,
+                        help="Comma-separated symbols to EXCLUDE from the optimized portfolio")
     parser.add_argument("--max-pages", type=int, default=200, help="Max pages to scan")
     parser.add_argument("--skip-scraper", action="store_true", help="Skip the scraping step")
-    
+
     args = parser.parse_args()
     
     root_dir = os.path.dirname(os.path.abspath(__file__))
@@ -117,6 +121,14 @@ def main():
     industries_list = [s.strip() for s in (args.industries or "").split(",") if s and s.strip()] or None
     if industries_list:
         print(f"Industry filter active: {industries_list}", flush=True)
+
+    include_stocks = [s.strip().upper() for s in (args.include_stocks or "").split(",") if s and s.strip()] or None
+    exclude_stocks = [s.strip().upper() for s in (args.exclude_stocks or "").split(",") if s and s.strip()] or None
+    if include_stocks:
+        print(f"Include stocks (portfolio universe): {include_stocks}", flush=True)
+    if exclude_stocks:
+        print(f"Exclude stocks: {exclude_stocks}", flush=True)
+
     # Update only the parameters section
     stats["Parameters"] = {
         "Min_History": p_min_hist,
@@ -127,6 +139,8 @@ def main():
         "Min_Price": args.min_price,
         "NYSE_NASDAQ_Only": not args.no_exchange_filter,
         "Industries": industries_list,
+        "Include_Stocks": include_stocks,
+        "Exclude_Stocks": exclude_stocks,
         "Max_Pages": p_max_pages
     }
     
@@ -252,7 +266,9 @@ def main():
                     "Max_PE_By_Sector": p_max_pe_by_sector, "Min_Market_Cap": args.min_market_cap,
                     "Min_Price": args.min_price,
                     "NYSE_NASDAQ_Only": not args.no_exchange_filter,
-                    "Industries": industries_list, "Max_Pages": p_max_pages
+                    "Industries": industries_list,
+                    "Include_Stocks": include_stocks, "Exclude_Stocks": exclude_stocks,
+                    "Max_Pages": p_max_pages
                 }
                 with open(stats_path, 'w') as f:
                     json.dump(stats, f, indent=2)
@@ -266,6 +282,23 @@ def main():
             if p_max_pe_by_sector:
                 report_args.append(f"--max-pe-by-sector={json.dumps(p_max_pe_by_sector)}")
             if not run_script(script_path, desc, args=report_args):
+                print("Pipeline interrupted.")
+                sys.exit(1)
+        elif "portfolio_optimizer" in script_path and "main.py" in script_path:
+            # Write sidecar file so optimizer always gets current include/exclude (avoids subprocess/args issues)
+            opt_dir = os.path.join(root_dir, "portfolio_optimizer")
+            sidecar_path = os.path.join(opt_dir, ".pipeline_include_exclude.json")
+            try:
+                with open(sidecar_path, "w") as f:
+                    json.dump({"Include_Stocks": include_stocks, "Exclude_Stocks": exclude_stocks}, f)
+            except Exception as e:
+                print(f"Warning: Could not write optimizer sidecar: {e}", flush=True)
+            opt_args = []
+            if include_stocks:
+                opt_args.extend(["--include-stocks", ",".join(include_stocks)])
+            if exclude_stocks:
+                opt_args.extend(["--exclude-stocks", ",".join(exclude_stocks)])
+            if not run_script(script_path, desc, args=opt_args if opt_args else None):
                 print("Pipeline interrupted.")
                 sys.exit(1)
         else:

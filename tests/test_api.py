@@ -61,6 +61,28 @@ def test_analyze_with_min_price_and_industries():
     assert "Technology" in ind_arg[0] and "Energy" in ind_arg[0]
 
 
+def test_analyze_with_include_exclude_stocks():
+    """Verify /analyze builds cmd with --include-stocks and --exclude-stocks when provided."""
+    from unittest.mock import patch
+    with patch("api_server.state") as mock_state:
+        mock_state.status = "idle"
+        mock_state.process = None
+        with patch("api_server.threading.Thread") as mock_thread:
+            response = client.post("/analyze", json={
+                "include_stocks": ["AAPL", "MSFT", "GOOGL"],
+                "exclude_stocks": ["TSLA"],
+                "skip_scraper": True,
+            })
+            assert response.status_code == 200
+            cmd = mock_thread.call_args[1]["args"][0]
+    inc = [a for a in cmd if a.startswith("--include-stocks=")]
+    exc = [a for a in cmd if a.startswith("--exclude-stocks=")]
+    assert len(inc) == 1
+    assert len(exc) == 1
+    assert "AAPL" in inc[0] and "MSFT" in inc[0] and "GOOGL" in inc[0]
+    assert "TSLA" in exc[0]
+
+
 def test_etf_analyze_post():
     """POST /etf-analyze starts pipeline and returns session_id."""
     from unittest.mock import patch

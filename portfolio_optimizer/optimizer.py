@@ -21,26 +21,50 @@ def load_data_from_db(symbols, db):
     return prices_df
 
 
-def load_data(top_50_file, data_dir):
+def _load_stock_db():
+    """Return DBManager for stock history (for CSV fallback). None if unavailable."""
+    try:
+        _root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+        if _root not in __import__('sys').path:
+            __import__('sys').path.insert(0, _root)
+        from stock_agent.db_manager import DBManager
+        return DBManager()
+    except Exception:
+        return None
+
+
+def load_data(top_50_file, data_dir, symbols_override=None):
     """
     Loads historical adjusted close prices for the top 50 stocks.
+    If symbols_override is provided, use that list instead of reading from top_50_file.
+    For each symbol: try CSV in data_dir first; if missing, try stock DB (so include-list symbols work).
     """
     try:
-        # Load Top 50 list
-        top_50_df = pd.read_csv(top_50_file)
-        symbols = top_50_df['Symbol'].tolist()
-        
+        if symbols_override is not None:
+            symbols = list(symbols_override)
+        else:
+            top_50_df = pd.read_csv(top_50_file)
+            symbols = top_50_df['Symbol'].tolist()
+
         print(f"Loading data for {len(symbols)} stocks...")
-        
+        db = _load_stock_db()
+        if db is not None:
+            print("(Using DB fallback for symbols without CSV)", flush=True)
+
         price_data = {}
         for symbol in symbols:
             file_path = os.path.join(data_dir, f"{symbol}.csv")
             if os.path.exists(file_path):
                 df = pd.read_csv(file_path, parse_dates=['Date'], index_col='Date')
-                # Use 'Close' (Assume Adjusted)
                 price_data[symbol] = df['Close']
+            elif db is not None:
+                df = db.load_history(symbol)
+                if not df.empty and 'Close' in df.columns:
+                    price_data[symbol] = df['Close']
+                else:
+                    print(f"Warning: No data for {symbol} (no CSV, DB empty or no Close).")
             else:
-                print(f"Warning: File for {symbol} not found.")
+                print(f"Warning: File for {symbol} not found (no DB fallback).")
                 
         # Combine into DataFrame
         prices_df = pd.DataFrame(price_data)
@@ -60,12 +84,12 @@ def load_data(top_50_file, data_dir):
         print(f"Error loading data: {e}")
         return pd.DataFrame()
 
-def optimize_portfolio(prices_df, risk_free_rate):
+def optimize_portfolio(prices_df, risk_free_rate, must_include_symbols=None):
     """
     Performs Mean-Variance Optimization to maximize Sharpe Ratio.
+    must_include_symbols: if set, these symbols get a minimum weight (1%) so they appear in the portfolio.
     """
     # 1. Calculate Expected Returns and Covariance
-    # Annualized Returns
     daily_returns = prices_df.pct_change().dropna()
     mean_daily_returns = daily_returns.mean()
     cov_matrix = daily_returns.cov()
@@ -74,26 +98,45 @@ def optimize_portfolio(prices_df, risk_free_rate):
     def negative_sharpe(weights):
         portfolio_return = np.sum(mean_daily_returns * weights) * 252
         portfolio_std_dev = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))) * np.sqrt(252)
-        
-        # Avoid division by zero
         if portfolio_std_dev == 0:
             return 0
-            
         sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std_dev
         return -sharpe_ratio
 
     # 3. Constraints and Bounds
     num_assets = len(prices_df.columns)
-    args = ()
-    
-    # Sum of weights must equal 1
+    columns = list(prices_df.columns)
+    include_set = None
+    if must_include_symbols:
+        include_set = {s.upper() if isinstance(s, str) else s for s in must_include_symbols}
+    MIN_INCLUDE_WEIGHT = 0.01  # 1% minimum for "must include" symbols
+
     constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    
-    # Weights between 0 and 0.2 (Max 20% per stock to ensure diversification)
-    bounds = tuple((0.0, 0.2) for asset in range(num_assets))
-    
-    # Initial Guess (Equal weights)
-    init_guess = num_assets * [1. / num_assets,]
+    bounds = []
+    for i in range(num_assets):
+        sym = columns[i]
+        sym_upper = (sym.upper() if isinstance(sym, str) else sym)
+        if include_set and sym_upper in include_set:
+            bounds.append((MIN_INCLUDE_WEIGHT, 0.2))  # force at least 1% in portfolio
+        else:
+            bounds.append((0.0, 0.2))
+    bounds = tuple(bounds)
+
+    # Initial Guess: give include-list symbols at least MIN_INCLUDE_WEIGHT, rest equal-split the remainder
+    n_include = sum(1 for i in range(num_assets) if include_set and (columns[i].upper() if isinstance(columns[i], str) else columns[i]) in include_set)
+    if n_include > 0 and include_set:
+        remainder = 1.0 - n_include * MIN_INCLUDE_WEIGHT
+        if remainder < 0:
+            remainder = 0.0
+        init_guess = []
+        for i in range(num_assets):
+            sym_upper = (columns[i].upper() if isinstance(columns[i], str) else columns[i])
+            if sym_upper in include_set:
+                init_guess.append(MIN_INCLUDE_WEIGHT)
+            else:
+                init_guess.append(remainder / (num_assets - n_include) if (num_assets - n_include) > 0 else 0)
+    else:
+        init_guess = num_assets * [1. / num_assets]
     
     # 4. Run Optimization
     print("Running optimization...")

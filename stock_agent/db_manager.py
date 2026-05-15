@@ -152,31 +152,39 @@ class DBManager:
         
         # Select and order columns to match table
         cols_to_keep = ['Date', 'Symbol', 'Open', 'High', 'Low', 'Close', 'Volume']
-        
-        # Handle missing columns if any (yfinance usage usually guarantees these)
+        # yfinance sometimes uses 'Adj Close' - use it if 'Close' missing
+        if 'Close' not in df.columns and 'Adj Close' in df.columns:
+            df['Close'] = df['Adj Close']
         for col in cols_to_keep:
             if col not in df.columns:
-                df[col] = None 
-                
-        data_to_store = df[cols_to_keep]
+                df[col] = None
+        data_to_store = df[cols_to_keep].copy()
+        # Coerce Volume to nullable integer (table expects INTEGER; float/NaN can cause issues)
+        if 'Volume' in data_to_store.columns:
+            data_to_store['Volume'] = pd.to_numeric(data_to_store['Volume'], errors='coerce').astype('Int64')
 
-        conn = sqlite3.connect(self.db_path)
-        try:
-            data_to_store.to_sql('stock_history', conn, if_exists='append', index=False)
-        except sqlite3.IntegrityError:
-            # If we hit duplicates (e.g. running same day twice), we might want to use 'replace' or handle gracefully
-            # For simplicity, 'append' fails on PK violation. 
-            # We can use method that ignores duplicates or updates.
-            # Pandas to_sql doesn't support 'OR IGNORE' natively well without a custom method.
-            # Let's try a custom insertion for better control if needed, 
-            # OR just ensure we only pass new data (which downloader logic handles).
-            # Fallback: if bulk append fails, try row by row or ignore
-             print(f"Warning: Duplicate data detected for {symbol}. Skipping duplicates.")
-             pass
-        except Exception as e:
-            print(f"Error saving {symbol} to DB: {e}")
-        finally:
-            conn.close()
+        # Use timeout to wait for lock (e.g. concurrent access or sync tool); retry once on failure
+        timeout_sec = 30
+        last_err = None
+        for attempt in range(2):
+            try:
+                conn = sqlite3.connect(self.db_path, timeout=timeout_sec)
+                try:
+                    data_to_store.to_sql('stock_history', conn, if_exists='append', index=False)
+                    conn.commit()
+                    return
+                finally:
+                    conn.close()
+            except sqlite3.IntegrityError:
+                print(f"Warning: Duplicate data for {symbol}, skipping.", flush=True)
+                return
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    import time
+                    time.sleep(0.5)
+                    continue
+                print(f"Error saving {symbol} to DB: {type(e).__name__}: {e}", flush=True)
             
     def load_history(self, symbol):
         """Load full history for a symbol as a DataFrame."""
