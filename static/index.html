@@ -416,6 +416,7 @@
             <button type="button" class="tab-btn" data-tab="etf-analysis">ETF Analysis</button>
             <button type="button" class="tab-btn" data-tab="mf-analysis">Mutual Funds</button>
             <button type="button" class="tab-btn" data-tab="portfolio-compare">Portfolio Compare</button>
+            <button type="button" class="tab-btn" data-tab="sec-filings">SEC Filings</button>
         </div>
 
         <div id="tab-pipeline" class="tab-panel active">
@@ -658,6 +659,58 @@
                     </div>
                     <div id="portfolio-chart-container" style="display:none;">
                         <canvas id="portfolio-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- ═══════════════ SEC FILINGS TAB ═══════════════ -->
+        <div id="tab-sec-filings" class="tab-panel">
+            <div class="grid">
+                <div class="card">
+                    <h2 style="margin-top:0">SEC Filings</h2>
+                    <p style="color:var(--text-secondary);font-size:0.9rem;margin-top:0">
+                        Downloads the most recent <strong>10-K</strong> (annual) and
+                        <strong>10-Q</strong> (quarterly) report from SEC EDGAR for each
+                        stock in the optimised portfolio.<br><br>
+                        Files are saved with the filing date in the filename.<br>
+                        Already-downloaded filings are skipped automatically.
+                    </p>
+
+                    <div id="sec-output-dir" style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;word-break:break-all;">
+                        Output folder: <em>loading…</em>
+                    </div>
+
+                    <button type="button" id="sec-run-btn">Download SEC Filings</button>
+                    <div id="sec-loading" class="loading-overlay" style="display:none;">
+                        <span>Downloading from SEC EDGAR…</span>
+                    </div>
+                </div>
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+                        <h2 style="margin:0">Download Log</h2>
+                        <span id="sec-status-badge" class="status-badge status-idle">Idle</span>
+                    </div>
+                    <div id="sec-results-area"
+                         style="background:#0f172a;font-family:monospace;white-space:pre-wrap;
+                                overflow:auto;max-height:60vh;min-height:200px;
+                                font-size:0.875rem;padding:1rem;border-radius:0.5rem;color:#e2e8f0">
+                        Click "Download SEC Filings" to start.
+                    </div>
+                    <div id="sec-file-list" style="margin-top:1rem;display:none;">
+                        <h3 style="margin:0 0 0.5rem;font-size:0.95rem;">Downloaded / Available Files</h3>
+                        <table id="sec-file-table"
+                               style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                            <thead>
+                                <tr style="color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border-color);">
+                                    <th style="padding:0.4rem 0.6rem">Symbol</th>
+                                    <th style="padding:0.4rem 0.6rem">Form</th>
+                                    <th style="padding:0.4rem 0.6rem">Date</th>
+                                    <th style="padding:0.4rem 0.6rem">File</th>
+                                    <th style="padding:0.4rem 0.6rem">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sec-file-tbody"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -1053,6 +1106,158 @@
 
         if (mfRunBtn) {
             mfRunBtn.addEventListener('click', (e) => { e.preventDefault(); runMfPipeline(); });
+        }
+
+        // ── SEC Filings Download ──────────────────────────────────────────────
+        const secRunBtn      = document.getElementById('sec-run-btn');
+        const secLoading     = document.getElementById('sec-loading');
+        const secResultsArea = document.getElementById('sec-results-area');
+        const secStatusBadge = document.getElementById('sec-status-badge');
+        const secFileList    = document.getElementById('sec-file-list');
+        const secFileTbody   = document.getElementById('sec-file-tbody');
+        const secOutputDir   = document.getElementById('sec-output-dir');
+        let secPollInterval  = null;
+
+        function renderSecResults(results, outputDir) {
+            if (!results || results.length === 0) return;
+            if (outputDir) {
+                secOutputDir.innerHTML = 'Output folder: <code style="font-size:0.8rem;">' + outputDir + '</code>';
+            }
+            secFileTbody.innerHTML = '';
+            results.forEach(r => {
+                if (!r.symbol) return;
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid var(--border-color)';
+                const statusText = r.error
+                    ? '<span style="color:var(--error-color)">Error: ' + r.error + '</span>'
+                    : r.skipped
+                        ? '<span style="color:var(--text-secondary)">Already existed</span>'
+                        : '<span style="color:var(--success-color)">Downloaded (' + (r.size_kb || '?') + ' KB)</span>';
+                tr.innerHTML =
+                    '<td style="padding:0.4rem 0.6rem">' + (r.symbol || '') + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem">' + (r.form   || '') + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem">' + (r.date   || '') + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem;word-break:break-all;font-size:0.8rem">' + (r.file || '—') + '</td>' +
+                    '<td style="padding:0.4rem 0.6rem">' + statusText + '</td>';
+                secFileTbody.appendChild(tr);
+            });
+            secFileList.style.display = 'block';
+        }
+
+        async function startSecDownload() {
+            secResultsArea.innerText = 'Starting SEC EDGAR download…\n';
+            secStatusBadge.className = 'status-badge status-running';
+            secStatusBadge.innerText = 'Running';
+            secRunBtn.disabled = true;
+            secLoading.style.display = 'flex';
+            secFileList.style.display = 'none';
+
+            try {
+                const resp = await fetch('/sec-download', {
+                    method: 'POST',
+                    headers: getApiHeaders(),
+                    body: JSON.stringify({}),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail || resp.statusText || 'Failed to start');
+                }
+
+                function pollSec() {
+                    fetch('/sec-download-status', { headers: getApiHeaders({}) })
+                        .then(r => r.json())
+                        .then(data => {
+                            // Stream logs
+                            secResultsArea.innerText = data.logs || 'Waiting…';
+                            secResultsArea.scrollTop = secResultsArea.scrollHeight;
+
+                            if (data.output_dir && secOutputDir) {
+                                secOutputDir.innerHTML = 'Output folder: <code style="font-size:0.8rem;">' + data.output_dir + '</code>';
+                            }
+
+                            if (data.status === 'completed') {
+                                clearInterval(secPollInterval);
+                                secPollInterval = null;
+                                secStatusBadge.className = 'status-badge status-success';
+                                secStatusBadge.innerText = 'Complete';
+                                secRunBtn.disabled = false;
+                                secLoading.style.display = 'none';
+                                renderSecResults(data.results, data.output_dir);
+                            } else if (data.status === 'error') {
+                                clearInterval(secPollInterval);
+                                secPollInterval = null;
+                                secStatusBadge.className = 'status-badge status-error';
+                                secStatusBadge.innerText = 'Error';
+                                secRunBtn.disabled = false;
+                                secLoading.style.display = 'none';
+                                if (data.results && data.results.length) {
+                                    renderSecResults(data.results, data.output_dir);
+                                }
+                            }
+                        })
+                        .catch(err => {
+                            clearInterval(secPollInterval);
+                            secPollInterval = null;
+                            secStatusBadge.className = 'status-badge status-error';
+                            secStatusBadge.innerText = 'Error';
+                            secRunBtn.disabled = false;
+                            secLoading.style.display = 'none';
+                            secResultsArea.innerText += '\n' + (err.message || 'Request failed');
+                        });
+                }
+                secPollInterval = setInterval(pollSec, 600);
+            } catch (err) {
+                secStatusBadge.className = 'status-badge status-error';
+                secStatusBadge.innerText = 'Error';
+                secRunBtn.disabled = false;
+                secLoading.style.display = 'none';
+                secResultsArea.innerText += '\n' + err.message;
+            }
+        }
+
+        // Pre-load current status/output dir on page load
+        fetch('/sec-download-status', { headers: getApiHeaders({}) })
+            .then(r => r.json())
+            .then(data => {
+                if (data.output_dir) {
+                    secOutputDir.innerHTML = 'Output folder: <code style="font-size:0.8rem;">' + data.output_dir + '</code>';
+                }
+                if (data.status === 'running') {
+                    // Re-attach to an in-progress job
+                    secStatusBadge.className = 'status-badge status-running';
+                    secStatusBadge.innerText = 'Running';
+                    secRunBtn.disabled = true;
+                    secLoading.style.display = 'flex';
+                    secResultsArea.innerText = data.logs || 'Running…';
+                    secPollInterval = setInterval(() => {
+                        fetch('/sec-download-status', { headers: getApiHeaders({}) })
+                            .then(r => r.json()).then(d => {
+                                secResultsArea.innerText = d.logs || '';
+                                secResultsArea.scrollTop = secResultsArea.scrollHeight;
+                                if (d.status !== 'running') {
+                                    clearInterval(secPollInterval);
+                                    secPollInterval = null;
+                                    secRunBtn.disabled = false;
+                                    secLoading.style.display = 'none';
+                                    secStatusBadge.className = d.status === 'completed'
+                                        ? 'status-badge status-success' : 'status-badge status-error';
+                                    secStatusBadge.innerText = d.status === 'completed' ? 'Complete' : 'Error';
+                                    if (d.results) renderSecResults(d.results, d.output_dir);
+                                }
+                            }).catch(() => { clearInterval(secPollInterval); });
+                    }, 600);
+                } else if ((data.status === 'completed' || data.status === 'error') && data.results && data.results.length) {
+                    secStatusBadge.className = data.status === 'completed'
+                        ? 'status-badge status-success' : 'status-badge status-error';
+                    secStatusBadge.innerText = data.status === 'completed' ? 'Complete' : 'Error';
+                    secResultsArea.innerText = data.logs || '';
+                    renderSecResults(data.results, data.output_dir);
+                }
+            })
+            .catch(() => {}); // silently ignore if server not yet ready
+
+        if (secRunBtn) {
+            secRunBtn.addEventListener('click', (e) => { e.preventDefault(); startSecDownload(); });
         }
 
         async function pollStatus() {

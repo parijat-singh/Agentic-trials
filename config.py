@@ -86,3 +86,14 @@ MF_CACHE_DB = os.path.join(_DB_ROOT, "mf_cache.db")
 MF_SESSIONS_DIR = os.path.join(MF_STORAGE_ROOT, "sessions")
 MF_ARCHIVE_DIR = os.path.join(MF_STORAGE_ROOT, "reports_archive")
 _safe_makedirs(os.path.dirname(MF_CACHE_DB), MF_SESSIONS_DIR, MF_ARCHIVE_DIR)
+
+# SEC Filings storage: 10-K and 10-Q downloads for optimized portfolio stocks
+if os.environ.get("SEC_FILINGS_DIR"):
+    SEC_FILINGS_DIR = os.environ["SEC_FILINGS_DIR"]
+elif os.path.exists(r"G:\My Drive\Agentic-trials-data"):
+    SEC_FILINGS_DIR = os.path.join(r"G:\My Drive\Agentic-trials-data", "sec_filings")
+elif os.environ.get("K_SERVICE") or os.environ.get("DATA_DIR"):
+    SEC_FILINGS_DIR = os.path.join(os.environ.get("DATA_DIR", "/tmp/app_data"), "sec_filings")
+else:
+    SEC_FILINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sec_filings")
+_safe_makedirs(SEC_FILINGS_DIR)

@@ -471,6 +471,85 @@ def get_mf_log(session_id: str, _: None = Depends(_require_api_key)):
         return {"session_id": session_id, "log": f.read()}
 
 
+# ── SEC Filings Download ──────────────────────────────────────────────────────
+
+class SecDownloadState:
+    def __init__(self):
+        self.status: str = "idle"   # idle | running | completed | error
+        self.logs:   list[str] = []
+        self.results: list[dict] = []
+        self._lock = threading.Lock()
+
+    def append_log(self, line: str) -> None:
+        with self._lock:
+            self.logs.append(line)
+
+    def get_logs_str(self) -> str:
+        with self._lock:
+            return "".join(self.logs)
+
+    def reset(self) -> None:
+        with self._lock:
+            self.logs = []
+            self.results = []
+            self.status = "running"
+
+
+sec_state = SecDownloadState()
+
+
+def _run_sec_download_background(portfolio_path: Optional[str], output_dir: Optional[str]) -> None:
+    """Background worker: runs the SEC filings downloader and updates sec_state."""
+    from sec_downloader.sec_filings_downloader import run_downloader
+
+    def _log(line: str):
+        sec_state.append_log(line)
+
+    try:
+        results = run_downloader(
+            portfolio_path=portfolio_path,
+            output_dir=output_dir,
+            log_callback=_log,
+        )
+        with sec_state._lock:
+            sec_state.results = results
+            sec_state.status = "completed"
+    except Exception as exc:
+        sec_state.append_log(f"\n[API] Unexpected error: {exc}\n")
+        with sec_state._lock:
+            sec_state.status = "error"
+
+
+class SecDownloadRequest(BaseModel):
+    portfolio_path: Optional[str] = None  # override; default = portfolio_optimizer/optimal_portfolio.csv
+    output_dir: Optional[str] = None      # override; default = config.SEC_FILINGS_DIR
+
+
+@app.post("/sec-download")
+async def start_sec_download(req: SecDownloadRequest = SecDownloadRequest(), _: None = Depends(_require_api_key)):
+    """Start a background download of 10-K and 10-Q filings for all portfolio stocks."""
+    if sec_state.status == "running":
+        raise HTTPException(status_code=400, detail="SEC download already in progress.")
+    sec_state.reset()
+    threading.Thread(
+        target=_run_sec_download_background,
+        args=(req.portfolio_path, req.output_dir),
+        daemon=True,
+    ).start()
+    return {"status": "started", "message": "SEC filings download started in background."}
+
+
+@app.get("/sec-download-status")
+def get_sec_download_status(_: None = Depends(_require_api_key)):
+    """Return current status, streaming logs, and results of the SEC download job."""
+    return {
+        "status":  sec_state.status,
+        "logs":    sec_state.get_logs_str(),
+        "results": sec_state.results,
+        "output_dir": config.SEC_FILINGS_DIR,
+    }
+
+
 @app.post("/stop")
 def stop_process(_: None = Depends(_require_api_key)):
     """Terminate the running stock pipeline process."""
