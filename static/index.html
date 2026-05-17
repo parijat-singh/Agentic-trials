@@ -394,6 +394,25 @@
         .compare-metrics-table td:first-child {
             text-align: left;
         }
+        /* Smart Portfolio phase steps */
+        .sp-phase-step {
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        .sp-phase-step.active {
+            background: #1e40af;
+            border-color: #3b82f6;
+            color: #eff6ff;
+        }
+        .sp-phase-step.done {
+            background: #14532d;
+            border-color: #22c55e;
+            color: #dcfce7;
+        }
     </style>
 </head>
 
@@ -417,6 +436,7 @@
             <button type="button" class="tab-btn" data-tab="mf-analysis">Mutual Funds</button>
             <button type="button" class="tab-btn" data-tab="portfolio-compare">Portfolio Compare</button>
             <button type="button" class="tab-btn" data-tab="sec-filings">Deep Analysis</button>
+            <button type="button" class="tab-btn" data-tab="smart-portfolio">Smart Portfolio</button>
         </div>
 
         <div id="tab-pipeline" class="tab-panel active">
@@ -689,6 +709,19 @@
                     <div id="deep-reports-dir" style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;word-break:break-all;">
                         Reports folder: <em>loading…</em>
                     </div>
+
+                    <div class="form-group" style="margin-bottom:1rem">
+                        <label for="deep-custom-symbols" style="font-weight:600">Stocks to Analyse</label>
+                        <input type="text" id="deep-custom-symbols"
+                               placeholder="e.g. AAPL, NVDA, MSFT  — leave blank to use current portfolio"
+                               autocomplete="off"
+                               style="margin-top:0.4rem">
+                        <div style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.3rem">
+                            Enter comma-separated tickers to analyse specific stocks.
+                            Leave blank to analyse all stocks in the current optimised portfolio.
+                        </div>
+                    </div>
+
                     <button type="button" id="deep-run-btn">Run AI Analysis</button>
                     <div id="deep-loading" class="loading-overlay" style="display:none;">
                         <span>Running deep analysis — this may take several minutes…</span>
@@ -718,6 +751,126 @@
                             </thead>
                             <tbody id="deep-report-tbody"></tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- ═══════════════ SMART PORTFOLIO TAB ═══════════════ -->
+        <div id="tab-smart-portfolio" class="tab-panel">
+            <div class="grid">
+                <!-- Config Panel -->
+                <div class="card">
+                    <h2 style="margin-top:0">Smart Portfolio</h2>
+                    <p style="color:var(--text-secondary);font-size:0.9rem;margin-top:0">
+                        Runs the full stock pipeline, performs AI deep analysis on every candidate,
+                        keeps only <strong>Buy / Cautious Buy / Strong Buy</strong> stocks, then
+                        re-optimises the portfolio. Reports are reused if ≤60 days old.
+                    </p>
+
+                    <div class="form-group">
+                        <label for="sp-min-history">Min History (Years)</label>
+                        <input type="number" id="sp-min-history" value="5.0" step="0.5" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="sp-max-ipo">Max IPO Age (Years)</label>
+                        <input type="number" id="sp-max-ipo" value="10.0" step="0.5" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="sp-min-market-cap">Min Market Cap ($B)</label>
+                        <input type="number" id="sp-min-market-cap" placeholder="e.g. 1.0" step="0.1" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="sp-min-price">Min Current Price ($)</label>
+                        <input type="number" id="sp-min-price" placeholder="e.g. 10" step="0.01" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="sp-exclude-stocks">Exclude stocks (optional)</label>
+                        <input type="text" id="sp-exclude-stocks" placeholder="e.g. BLTE, TFPM" autocomplete="off">
+                        <div style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.25rem">Comma-separated symbols to remove from the candidate pool.</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="sp-target-size">Target Portfolio Size</label>
+                        <input type="number" id="sp-target-size" value="10" min="3" max="30" step="1">
+                        <div style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.25rem">Max stocks in the final optimised portfolio.</div>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="sp-nyse-nasdaq" checked>
+                        <label for="sp-nyse-nasdaq" style="margin-bottom:0;cursor:pointer">NYSE/NASDAQ Only</label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="sp-skip-scraper">
+                        <label for="sp-skip-scraper" style="margin-bottom:0;cursor:pointer">Skip Scraper (Use Cached Data)</label>
+                    </div>
+
+                    <button type="button" id="sp-run-btn">Run Smart Portfolio</button>
+                    <div id="sp-loading" class="loading-overlay" style="display:none">
+                        <span id="sp-loading-text">Running Smart Portfolio…</span>
+                    </div>
+                </div>
+
+                <!-- Output Panel -->
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+                        <h2 style="margin:0">Output</h2>
+                        <span id="sp-status-badge" class="status-badge status-idle">Idle</span>
+                    </div>
+
+                    <!-- Phase progress bar -->
+                    <div id="sp-phase-bar" style="display:none;margin-bottom:1rem;display:none">
+                        <div style="display:flex;gap:0.5rem;font-size:0.8rem">
+                            <span id="sp-phase-pipeline"  class="sp-phase-step">1 · Pipeline</span>
+                            <span style="color:var(--text-secondary)">→</span>
+                            <span id="sp-phase-analyzing" class="sp-phase-step">2 · Deep Analysis</span>
+                            <span style="color:var(--text-secondary)">→</span>
+                            <span id="sp-phase-optimizing" class="sp-phase-step">3 · Optimising</span>
+                            <span style="color:var(--text-secondary)">→</span>
+                            <span id="sp-phase-completed" class="sp-phase-step">4 · Done</span>
+                        </div>
+                    </div>
+
+                    <!-- Candidate verdicts table (live during analysis) -->
+                    <div id="sp-candidates-section" style="display:none;margin-bottom:1rem">
+                        <h3 style="margin:0 0 0.5rem;font-size:0.95rem">Candidate Verdicts</h3>
+                        <div style="overflow-x:auto">
+                            <table id="sp-candidates-table" style="width:100%;border-collapse:collapse;font-size:0.82rem">
+                                <thead>
+                                    <tr style="color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border-color)">
+                                        <th style="padding:0.35rem 0.6rem">Symbol</th>
+                                        <th style="padding:0.35rem 0.6rem">Sharpe</th>
+                                        <th style="padding:0.35rem 0.6rem">Verdict</th>
+                                        <th style="padding:0.35rem 0.6rem">Signal</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sp-candidates-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Log area -->
+                    <div id="sp-log-area"
+                         style="background:#0f172a;font-family:monospace;white-space:pre-wrap;
+                                overflow:auto;max-height:40vh;min-height:150px;
+                                font-size:0.82rem;padding:1rem;border-radius:0.5rem;color:#e2e8f0;margin-bottom:1rem">
+                        Click "Run Smart Portfolio" to start.
+                    </div>
+
+                    <!-- Final portfolio weights table -->
+                    <div id="sp-portfolio-section" style="display:none">
+                        <h3 style="margin:0 0 0.5rem;font-size:0.95rem">Final Portfolio</h3>
+                        <div style="overflow-x:auto">
+                            <table id="sp-portfolio-table" style="width:100%;border-collapse:collapse;font-size:0.85rem">
+                                <thead>
+                                    <tr style="color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border-color)">
+                                        <th style="padding:0.4rem 0.6rem">Symbol</th>
+                                        <th style="padding:0.4rem 0.6rem">Weight</th>
+                                        <th style="padding:0.4rem 0.6rem">Return Contrib</th>
+                                        <th style="padding:0.4rem 0.6rem">Risk Contrib</th>
+                                        <th style="padding:0.4rem 0.6rem">Correlation</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sp-portfolio-tbody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1180,11 +1333,22 @@
             deepLoading.style.display = 'flex';
             deepReportList.style.display = 'none';
 
+            // Read optional custom symbol list
+            const rawSymbols = (document.getElementById('deep-custom-symbols')?.value || '').trim();
+            const symbols = rawSymbols
+                ? rawSymbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+                : null;
+            if (symbols) {
+                deepResultsArea.innerText += `Analysing ${symbols.length} specific stock(s): ${symbols.join(', ')}\n`;
+            } else {
+                deepResultsArea.innerText += 'Analysing all stocks in the current optimised portfolio…\n';
+            }
+
             try {
                 const resp = await fetch('/deep-analysis', {
                     method: 'POST',
                     headers: getApiHeaders(),
-                    body: JSON.stringify({}),
+                    body: JSON.stringify({ symbols }),
                 });
                 if (!resp.ok) {
                     const err = await resp.json().catch(() => ({}));
@@ -1523,6 +1687,183 @@
                 pcLoading.style.display = 'none';
             }
         });
+
+        // ── Smart Portfolio ───────────────────────────────────────────────────
+        (function () {
+            const spRunBtn      = document.getElementById('sp-run-btn');
+            const spLoading     = document.getElementById('sp-loading');
+            const spLoadingText = document.getElementById('sp-loading-text');
+            const spStatusBadge = document.getElementById('sp-status-badge');
+            const spLogArea     = document.getElementById('sp-log-area');
+            const spPhaseBar    = document.getElementById('sp-phase-bar');
+            const spCandidatesSection  = document.getElementById('sp-candidates-section');
+            const spCandidatesTbody    = document.getElementById('sp-candidates-tbody');
+            const spPortfolioSection   = document.getElementById('sp-portfolio-section');
+            const spPortfolioTbody     = document.getElementById('sp-portfolio-tbody');
+
+            const phaseEls = {
+                pipeline:  document.getElementById('sp-phase-pipeline'),
+                analyzing: document.getElementById('sp-phase-analyzing'),
+                optimizing:document.getElementById('sp-phase-optimizing'),
+                completed: document.getElementById('sp-phase-completed'),
+            };
+            const phaseOrder = ['pipeline', 'analyzing', 'optimizing', 'completed'];
+
+            let spPollInterval = null;
+            let spLastLogLen   = 0;
+            let spLastCandLen  = 0;
+
+            function pct(v) { return (v == null ? 'N/A' : (v * 100).toFixed(2) + '%'); }
+            function num(v) { return (v == null ? 'N/A' : (typeof v === 'number' ? v.toFixed(4) : v)); }
+
+            function setPhase(phase) {
+                spPhaseBar.style.display = 'flex';
+                const idx = phaseOrder.indexOf(phase);
+                phaseOrder.forEach((p, i) => {
+                    const el = phaseEls[p];
+                    if (!el) return;
+                    el.classList.remove('active', 'done');
+                    if (i < idx) el.classList.add('done');
+                    else if (i === idx) el.classList.add('active');
+                });
+            }
+
+            function updateCandidatesTable(candidates) {
+                if (!candidates || candidates.length === 0) return;
+                spCandidatesSection.style.display = 'block';
+                // Only append new rows
+                for (let i = spLastCandLen; i < candidates.length; i++) {
+                    const c = candidates[i];
+                    const tr = document.createElement('tr');
+                    const approved = c.approved;
+                    tr.style.background = approved ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)';
+                    tr.innerHTML =
+                        `<td style="padding:0.35rem 0.6rem;font-weight:600">${c.symbol}</td>` +
+                        `<td style="padding:0.35rem 0.6rem">${num(c.sharpe)}</td>` +
+                        `<td style="padding:0.35rem 0.6rem;text-transform:capitalize">${c.verdict}</td>` +
+                        `<td style="padding:0.35rem 0.6rem;font-weight:600;color:${approved ? '#4ade80' : '#f87171'}">` +
+                        (approved ? '✓ Buy' : '✗ Skip') + '</td>';
+                    spCandidatesTbody.appendChild(tr);
+                }
+                spLastCandLen = candidates.length;
+            }
+
+            function renderPortfolio(portfolio) {
+                if (!portfolio || portfolio.length === 0) return;
+                spPortfolioSection.style.display = 'block';
+                spPortfolioTbody.innerHTML = '';
+                portfolio.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid var(--border-color)';
+                    tr.innerHTML =
+                        `<td style="padding:0.4rem 0.6rem;font-weight:600">${row.Symbol}</td>` +
+                        `<td style="padding:0.4rem 0.6rem">${pct(row.Weight)}</td>` +
+                        `<td style="padding:0.4rem 0.6rem">${pct(row['Return Contrib'])}</td>` +
+                        `<td style="padding:0.4rem 0.6rem">${pct(row['Risk Contrib'])}</td>` +
+                        `<td style="padding:0.4rem 0.6rem">${num(row.Correlation)}</td>`;
+                    spPortfolioTbody.appendChild(tr);
+                });
+            }
+
+            function pollSp(sessionId) {
+                fetch('/smart-portfolio-status/' + sessionId, { headers: getApiHeaders({}) })
+                    .then(r => r.json())
+                    .then(data => {
+                        // Append only new log lines
+                        const full = data.logs || '';
+                        if (full.length > spLastLogLen) {
+                            spLogArea.innerText += full.slice(spLastLogLen);
+                            spLastLogLen = full.length;
+                            spLogArea.scrollTop = spLogArea.scrollHeight;
+                        }
+
+                        setPhase(data.phase || 'pipeline');
+                        spLoadingText.innerText = {
+                            pipeline:  'Phase 1 — Running stock pipeline…',
+                            analyzing: 'Phase 2 — AI deep analysis…',
+                            optimizing:'Phase 3 — Optimising portfolio…',
+                            completed: 'Done!',
+                        }[data.phase] || 'Running…';
+
+                        updateCandidatesTable(data.candidates || []);
+
+                        if (data.status === 'completed') {
+                            clearInterval(spPollInterval);
+                            spPollInterval = null;
+                            spStatusBadge.className = 'status-badge status-success';
+                            spStatusBadge.innerText = 'Complete';
+                            spRunBtn.disabled = false;
+                            spLoading.style.display = 'none';
+                            setPhase('completed');
+                            renderPortfolio(data.portfolio || []);
+                        } else if (data.status === 'error') {
+                            clearInterval(spPollInterval);
+                            spPollInterval = null;
+                            spStatusBadge.className = 'status-badge status-error';
+                            spStatusBadge.innerText = 'Error';
+                            spRunBtn.disabled = false;
+                            spLoading.style.display = 'none';
+                        }
+                    })
+                    .catch(err => {
+                        clearInterval(spPollInterval);
+                        spPollInterval = null;
+                        spStatusBadge.className = 'status-badge status-error';
+                        spStatusBadge.innerText = 'Error';
+                        spRunBtn.disabled = false;
+                        spLoading.style.display = 'none';
+                        spLogArea.innerText += '\n' + (err.message || 'Poll failed');
+                    });
+            }
+
+            spRunBtn.addEventListener('click', async () => {
+                // Reset UI
+                spLogArea.innerText = 'Starting Smart Portfolio…\n';
+                spLastLogLen = 0;
+                spLastCandLen = 0;
+                spCandidatesTbody.innerHTML = '';
+                spPortfolioTbody.innerHTML = '';
+                spCandidatesSection.style.display = 'none';
+                spPortfolioSection.style.display = 'none';
+                spStatusBadge.className = 'status-badge status-running';
+                spStatusBadge.innerText = 'Running';
+                spRunBtn.disabled = true;
+                spLoading.style.display = 'flex';
+                spLoadingText.innerText = 'Phase 1 — Running stock pipeline…';
+                setPhase('pipeline');
+
+                const minPriceRaw = (document.getElementById('sp-min-price').value || '').trim();
+                const minMarketCapRaw = (document.getElementById('sp-min-market-cap').value || '').trim();
+                const excludeRaw = (document.getElementById('sp-exclude-stocks').value || '').trim();
+                const payload = {
+                    min_history: parseFloat(document.getElementById('sp-min-history').value) || 5.0,
+                    max_ipo: parseFloat(document.getElementById('sp-max-ipo').value) || 10.0,
+                    min_market_cap: minMarketCapRaw ? parseFloat(minMarketCapRaw) : null,
+                    min_price: minPriceRaw ? parseFloat(minPriceRaw) : null,
+                    no_exchange_filter: !document.getElementById('sp-nyse-nasdaq').checked,
+                    exclude_stocks: excludeRaw ? excludeRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : null,
+                    target_portfolio_size: parseInt(document.getElementById('sp-target-size').value) || 10,
+                    skip_scraper: document.getElementById('sp-skip-scraper').checked,
+                };
+
+                try {
+                    const resp = await fetch('/smart-portfolio', {
+                        method: 'POST',
+                        headers: getApiHeaders(),
+                        body: JSON.stringify(payload),
+                    });
+                    if (!resp.ok) throw new Error((await resp.json()).detail || 'Failed to start');
+                    const { session_id } = await resp.json();
+                    spPollInterval = setInterval(() => pollSp(session_id), 800);
+                } catch (err) {
+                    spStatusBadge.className = 'status-badge status-error';
+                    spStatusBadge.innerText = 'Error';
+                    spRunBtn.disabled = false;
+                    spLoading.style.display = 'none';
+                    spLogArea.innerText += '\nError: ' + err.message;
+                }
+            });
+        })();
     </script>
 
 </body>
