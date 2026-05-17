@@ -52,7 +52,7 @@ def calculate_sharpe_ratio(df, risk_free_rate):
 def rank_stocks(data_dir, risk_free_rate):
     """
     Iterates through CSVs in data_dir, calculates Sharpe, and ranks them.
-    Returns: DataFrame of Top 50 Stocks.
+    Returns: DataFrame of Top 100 Stocks.
     """
     results = []
     
@@ -257,11 +257,11 @@ def rank_stocks(data_dir, risk_free_rate):
         row_dict['P/E Ratio'] = pe
         final_results.append(row_dict)
         
-        if len(final_results) >= 50:
+        if len(final_results) >= 100:
             break
 
-    # Return Top 50 (After P/E Filtering)
-    return pd.DataFrame(final_results).head(50)
+    # Return Top 100 (After P/E Filtering)
+    return pd.DataFrame(final_results).head(100)
 
 if __name__ == "__main__":
     # Test with dummy data or just run imported

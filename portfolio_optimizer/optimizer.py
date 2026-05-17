@@ -110,6 +110,9 @@ def optimize_portfolio(prices_df, risk_free_rate, must_include_symbols=None):
     if must_include_symbols:
         include_set = {s.upper() if isinstance(s, str) else s for s in must_include_symbols}
     MIN_INCLUDE_WEIGHT = 0.01  # 1% minimum for "must include" symbols
+    # Auto-relax the 20% cap when there are few stocks so the sum=1 constraint stays feasible.
+    # e.g. 3 approved stocks → max = max(0.20, 1/3) = 0.34 so weights can sum to 1.
+    MAX_WEIGHT = max(0.20, 1.0 / max(num_assets, 1))
 
     constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
     bounds = []
@@ -117,9 +120,9 @@ def optimize_portfolio(prices_df, risk_free_rate, must_include_symbols=None):
         sym = columns[i]
         sym_upper = (sym.upper() if isinstance(sym, str) else sym)
         if include_set and sym_upper in include_set:
-            bounds.append((MIN_INCLUDE_WEIGHT, 0.2))  # force at least 1% in portfolio
+            bounds.append((MIN_INCLUDE_WEIGHT, MAX_WEIGHT))  # force at least 1% in portfolio
         else:
-            bounds.append((0.0, 0.2))
+            bounds.append((0.0, MAX_WEIGHT))
     bounds = tuple(bounds)
 
     # Initial Guess: give include-list symbols at least MIN_INCLUDE_WEIGHT, rest equal-split the remainder

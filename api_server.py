@@ -608,14 +608,31 @@ def _run_deep_analysis_background(
     symbols: Optional[list],
 ) -> None:
     """Background worker: runs the deep portfolio analysis and updates deep_analysis_state."""
+    import tempfile
+    import pandas as pd
     from deep_analysis.main import run_deep_analysis
 
     def _log(line: str):
         deep_analysis_state.append_log(line)
 
+    _tmp_path = None
     try:
+        # When a custom symbol list is provided, the SEC downloader must know
+        # about those tickers (it reads from a portfolio CSV, not a symbols list).
+        # Write a temp CSV so the downloader fetches filings for the right stocks.
+        effective_portfolio_path = portfolio_path
+        if symbols and not portfolio_path:
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".csv", delete=False, encoding="utf-8"
+            )
+            pd.DataFrame({"Symbol": [s.upper() for s in symbols]}).to_csv(tmp.name, index=False)
+            tmp.close()
+            _tmp_path = tmp.name
+            effective_portfolio_path = _tmp_path
+            _log(f"[API] Custom symbol list: {', '.join(s.upper() for s in symbols)}\n")
+
         results = run_deep_analysis(
-            portfolio_path=portfolio_path,
+            portfolio_path=effective_portfolio_path,
             sec_filings_dir=sec_filings_dir,
             reports_dir=reports_dir,
             symbols=symbols,
@@ -628,6 +645,12 @@ def _run_deep_analysis_background(
         deep_analysis_state.append_log(f"\n[API] Unexpected error: {exc}\n")
         with deep_analysis_state._lock:
             deep_analysis_state.status = "error"
+    finally:
+        if _tmp_path and os.path.exists(_tmp_path):
+            try:
+                os.unlink(_tmp_path)
+            except Exception:
+                pass
 
 
 class DeepAnalysisRequest(BaseModel):
@@ -682,6 +705,106 @@ def regenerate_html_reports_endpoint(_: None = Depends(_require_api_key)):
     from deep_analysis.report_writer import regenerate_html_reports
     count = regenerate_html_reports(config.DEEP_ANALYSIS_DIR)
     return {"status": "ok", "regenerated": count, "reports_dir": config.DEEP_ANALYSIS_DIR}
+
+
+# ── Smart Portfolio ───────────────────────────────────────────────────────────
+
+class SmartPortfolioRequest(BaseModel):
+    # Pipeline parameters (mirror AnalyzeRequest)
+    min_history: float = 5.0
+    max_ipo: float = 10.0
+    min_market_cap: Optional[float] = None
+    max_pe_by_sector: Optional[Dict[str, float]] = None
+    min_price: Optional[float] = None
+    no_exchange_filter: bool = False
+    industries: Optional[List[str]] = None
+    exclude_stocks: Optional[List[str]] = None
+    max_pages: int = 200
+    skip_scraper: bool = False
+    # Smart-portfolio-specific
+    target_portfolio_size: int = 10
+
+
+smart_portfolio_sessions: Dict[str, Dict] = {}
+
+
+def _run_smart_portfolio_background(session_id: str, req: SmartPortfolioRequest) -> None:
+    """Construct the pipeline command and hand off to the runner."""
+    import json as _json
+    from smart_portfolio.runner import run_smart_portfolio
+
+    _cleanup_old_sessions(smart_portfolio_sessions)
+    smart_portfolio_sessions[session_id] = {
+        "status": "running",
+        "phase": "pipeline",
+        "logs": [],
+        "candidates": [],
+        "portfolio": [],
+        "_created": time.time(),
+    }
+
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Build same pipeline command as /analyze
+    cmd = [sys.executable, "-u", "run_pipeline.py"]
+    cmd.append(f"--min-history={req.min_history}")
+    cmd.append(f"--min-ipo={req.min_history}")
+    cmd.append(f"--max-ipo={req.max_ipo}")
+    cmd.append(f"--max-pages={req.max_pages}")
+    if req.max_pe_by_sector:
+        cmd.append(f"--max-pe-by-sector={_json.dumps(req.max_pe_by_sector)}")
+    if req.min_market_cap is not None:
+        cmd.append(f"--min-market-cap={req.min_market_cap}")
+    if req.min_price is not None:
+        cmd.append(f"--min-price={req.min_price}")
+    if req.no_exchange_filter:
+        cmd.append("--no-exchange-filter")
+    industries = req.industries if req.industries is not None else []
+    industries_str = ",".join(str(s).strip() for s in industries if s)
+    if industries_str:
+        cmd.append(f"--industries={industries_str}")
+    exclude_str = ",".join(str(s).strip().upper() for s in (req.exclude_stocks or []) if s and str(s).strip())
+    if exclude_str:
+        cmd.append(f"--exclude-stocks={exclude_str}")
+    if req.skip_scraper:
+        cmd.append("--skip-scraper")
+
+    run_smart_portfolio(
+        session_id=session_id,
+        pipeline_cmd=cmd,
+        target_size=req.target_portfolio_size,
+        sessions=smart_portfolio_sessions,
+        root_dir=root_dir,
+    )
+
+
+@app.post("/smart-portfolio")
+async def start_smart_portfolio(req: SmartPortfolioRequest, _: None = Depends(_require_api_key)):
+    """Start a Smart Portfolio job: pipeline → deep analysis → filter → optimise."""
+    import uuid
+    session_id = str(uuid.uuid4())[:8]
+    threading.Thread(
+        target=_run_smart_portfolio_background,
+        args=(session_id, req),
+        daemon=True,
+    ).start()
+    return {"status": "started", "session_id": session_id}
+
+
+@app.get("/smart-portfolio-status/{session_id}")
+def get_smart_portfolio_status(session_id: str, _: None = Depends(_require_api_key)):
+    """Return live status, logs, candidate verdicts, and final portfolio weights."""
+    _validate_session_id(session_id, "smart-portfolio session")
+    if session_id not in smart_portfolio_sessions:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    s = smart_portfolio_sessions[session_id]
+    return {
+        "status":     s["status"],
+        "phase":      s.get("phase", "pipeline"),
+        "logs":       "".join(s["logs"]),
+        "candidates": s.get("candidates", []),
+        "portfolio":  s.get("portfolio", []),
+    }
 
 
 @app.post("/stop")
